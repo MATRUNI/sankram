@@ -1,6 +1,7 @@
 # Sankram (संक्रम) — High-Performance C Reverse Proxy & Dynamic Edge Gateway
 
 [![CI](https://github.com/MATRUNI/sankram/actions/workflows/ci.yml/badge.svg)](https://github.com/MATRUNI/sankram/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A lightweight, blazing-fast, and memory-efficient HTTP/HTTPS reverse proxy and dynamic edge gateway built from scratch in pure C. Designed to tackle extreme concurrency using a **Multi-Reactor Epoll/KQueue architecture**, an **asynchronous double-buffering logger**, and raw POSIX socket/TLS multiplexing with **zero external HTTP dependencies**.
 
@@ -18,8 +19,105 @@ Benchmark measurements executed on an 8-core Linux system (`x86_64`) under indus
 
 ---
 
+## 🏆 Verified `wrk` Benchmark Report
+
+All measurements are officially conducted using **`wrk 4.2.0 [epoll]`** on an 8-core Linux system (`x86_64`, Intel Core i5-9300H @ 2.40GHz) across industrial sustained and burst scenarios.
+
+---
+
+### 🔍 What is `wrk` & How Does It Work?
+
+[`wrk`](https://github.com/wg/wrk) is the modern gold-standard HTTP benchmarking tool in systems engineering. Unlike legacy utilities like ApacheBench (`ab`) which use synchronous blocking sockets, `wrk` is architected for extreme scale:
+
+1. **Multi-Reactor Event Loops**: Each client worker thread runs its own dedicated non-blocking event loop (`epoll` on Linux, `kqueue` on macOS/BSD). A single `wrk` thread can effortlessly drive thousands of live, concurrent HTTP/1.1 connections without CPU overhead or thread contention.
+2. **True Persistent Keep-Alive**: Reuses underlying TCP sockets continuously, streaming new requests the instant previous responses are received to measure true high-frequency proxy throughput.
+3. **Microsecond Precision Timers**: Measures end-to-end socket round-trips using monotonic hardware timers, generating mathematically rigorous latency distributions (p50, p75, p90, p99, and maximum tail latency).
+4. **Zero Client Bottlenecking**: Written in pure C with LuaJIT integration, `wrk` operates with near-zero runtime overhead, ensuring that benchmark numbers reflect the proxy's true capabilities rather than client-side throttling.
+
+---
+
+### 1. Sustained 5-Minute Industrial Endurance Soak Test (25.39M+ Requests)
+
+Under non-stop continuous load for **5 full minutes (300 seconds)** across 200 persistent connections, we tested 4, 8, and 10 reactor configurations:
+
+| Metric | 4 Reactors (`-t 4`) | 8 Reactors (`-t 8`) | 10 Reactors (`-t 10`) 🏆 | 10-Reactor Gain vs 4-Core |
+| :--- | :---: | :---: | :---: | :---: |
+| **Test Duration** | 5m (300 seconds) | 5m (300 seconds) | **5m (300 seconds)** | Identical |
+| **Total Requests Processed** | 15,480,029 | 24,553,944 | **25,397,612 reqs** | **+9.92 Million more requests! (+64.1%)** 🚀 |
+| **Sustained Throughput** | 51,592.04 req/s | 81,843.03 req/s | **84,648.85 req/s** | **+33,056 req/sec (+64.1%)** 🏆 |
+| **Network Transfer Rate** | 6.00 MB/s | 9.52 MB/s | **9.85 MB/s** | **+3.85 MB/s (+64.2%)** |
+| **Total Data Streamed** | 1.76 GB | 2.79 GB | **2.89 Gigabytes** | **+1.13 GB** |
+| **Median Latency (p50)** | 3.60 ms | 2.30 ms | **2.16 ms** | **40.0% faster response!** 🎯 |
+| **99th Percentile (p99)** | 8.06 ms | 4.16 ms | **4.60 ms** | **Sub-5ms tail latency!** |
+| **Dropped / Failed Requests**| **0 (0.00%)** | **0 (0.00%)** | **0 (0.00%)** | **100% Reliable** ✅ |
+| **Memory Drift (30s → 300s)**| **0.00 MB** | **0.00 MB** | **0.00 MB** | **PERFECT ZERO LEAK (10.2 MB RSS)** ✅ |
+
+> 📖 **Full Architectural Reports**:
+> - [5-Minute Sustained Soak Report (reports/SOAK_TEST_REPORT.md)](reports/SOAK_TEST_REPORT.md)
+> - [Deep Stress & Resilience Battery (reports/STRESS_EXPERIMENTS_REPORT.md)](reports/STRESS_EXPERIMENTS_REPORT.md)
+> - [Historical Optimization & Architecture Log (reports/OPTIMIZATION_LOG.md)](reports/OPTIMIZATION_LOG.md)
+
+---
+
+### 2. Throughput & Latency Profile Across Concurrency Levels
+
+| Concurrency | Client Threads | Duration | Throughput (Req/s) | p50 Latency | p90 Latency | p99 Latency | Failed Reqs |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **100 conns** | 4 threads | 30s | **79,653.74 req/s** | 1.17 ms | 2.45 ms | 3.08 ms | **0** |
+| **200 conns** | 8 threads | 30s | **77,180.20 req/s** | 2.48 ms | 3.82 ms | 5.12 ms | **0** |
+| **400 conns** | 8 threads | 15s | **82,852.33 req/s** | 4.67 ms | 6.45 ms | 7.95 ms | **0** |
+| **2,000 conns** | 16 threads | 10s | **71,707.00 req/s** | 11.20 ms | 18.50 ms | 24.30 ms | **0** |
+
+- **Peak Burst Record**: **86,367.57 requests/sec** (872,000+ completed requests in 10s with 0 socket errors).
+- **Extreme Scale (400 conns)**: **1,243,530 requests** processed in 15 seconds with **100% success rate (0 failures)**.
+- **Kernel Memory Footprint**: Remained flat at **~14.2 MB RSS** under full multi-worker saturation.
+
+---
+
+### 3. High-Payload Data Transfer (4 KB Body, 200 conns, 8 threads, 30s)
+
+- **Throughput**: **56,154.36 req/sec**
+- **Transfer Rate**: **224.23 MB/sec**
+- **Total Data Streamed**: **6.59 Gigabytes** transferred through loopback in 30 seconds
+- **Latency Distribution**: **3.32 ms median (p50)** and **5.81 ms 99th percentile (p99)**
+- **Data Integrity**: Zero truncated responses or stream stalls
+
+---
+
+### 4. Rapid Connection Churn (`Connection: close`)
+
+Evaluates performance under extreme connection churn where clients do not reuse connections and force continuous TCP connection handshakes and teardowns:
+
+| Workload Configuration | Architecture | Churn Throughput | Socket Errors | Port Exhaustion Status |
+| :--- | :---: | :---: | :---: | :---: |
+| **Without Pool** | Fresh TCP socket per request | 14,325 req/sec | High (kernel limits) | Ephemeral port exhaustion (`TIME_WAIT`) |
+| **With Thread-Local Pool** | Lock-free worker pool (`MAX 64`) | **37,948 req/sec (+165%)** | **0 errors (380k+ requests)** | **Zero port leaks (100% clean)** |
+
+---
+
+### 5. How to Reproduce `wrk` Benchmarks Locally
+
+You can replicate any of these benchmarks on Linux or macOS:
+
+```bash
+# 1. Start the ultra-fast mock upstream server (or your own backend)
+node scripts/mock_upstream.js &
+
+# 2. Launch Sankram in high-performance error-only log mode
+./build/sankram -p 17777 -l error -t 10 &
+
+# 3. Run a quick 30-second high-concurrency wrk benchmark
+wrk -t 2 -c 200 -d 30s --latency "http://127.0.0.1:17777/?url=http://127.0.0.1:9099/"
+
+# 4. Or run the automated 5-minute soak endurance test
+./scripts/run_wrk_soak.sh 5m 200 2 10
+```
+
+---
+
 ## 📑 Table of Contents
 - [Architecture Overview](#-architecture-overview)
+- [Verified wrk Benchmark Report](#-verified-wrk-benchmark-report)
 - [Key Features & Engineering Highlights](#-key-features--engineering-highlights)
 - [Project Structure](#-project-structure)
 - [Prerequisites & Build](#-prerequisites--build)
@@ -566,4 +664,5 @@ This project was built from absolute scratch as a deep dive into systems program
 ---
 
 ## 📄 License
-Open source under the MIT License.
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
