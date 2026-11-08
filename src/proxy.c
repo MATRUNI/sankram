@@ -421,7 +421,9 @@ int proxy_handle_client(struct client_session *session)
         {
             set_socket_blocking(session->con.client_fd);
             set_socket_timeout(session->con.client_fd);
-            if(stream_body(&session->con,false,buffer,capacity,total,headers_end,content_length)==1)
+            int err = stream_body(&session->con,false,buffer,capacity,total,headers_end,content_length);
+            set_socket_non_blocking(session->con.client_fd);
+            if(err == 1)
             {
                 send_client_error(client_fd, 502, "Failed to stream request body to target server\n");
                 goto cleanup_con;
@@ -447,7 +449,12 @@ int proxy_handle_client(struct client_session *session)
         start_ms = get_time_ms();
     }
 
-    if (receiveHTTPResponse(&session->con,!keep_alive) == 1)
+    set_socket_blocking(session->con.client_fd);
+    set_socket_timeout(session->con.client_fd);
+    int res_err = receiveHTTPResponse(&session->con,!keep_alive);
+    set_socket_non_blocking(session->con.client_fd);
+
+    if (res_err == 1)
     {
         send_client_error(client_fd, 502, "Target server closed connection without valid HTTP response\n");
         goto cleanup_con;
