@@ -34,9 +34,10 @@ static int kqueue_engine_add(struct poll_engine *engine, int target, int flags, 
 
 static int kqueue_engine_del(struct poll_engine *engine, int target)
 {
-    struct kevent kev;
-    EV_SET(&kev, target, EVFILT_READ, EV_DELETE, 0, 0, NULL);
-    kevent(engine->fd, &kev, 1, NULL, 0, NULL);
+    struct kevent kevs[2];
+    EV_SET(&kevs[0], target, EVFILT_READ, EV_DELETE, 0, 0, NULL);
+    EV_SET(&kevs[1], target, EVFILT_WRITE, EV_DELETE, 0, 0, NULL);
+    kevent(engine->fd, kevs, 2, NULL, 0, NULL);
     return 0;
 }
 

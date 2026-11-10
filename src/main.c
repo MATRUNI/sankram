@@ -88,13 +88,13 @@ static void *proxy_thread_worker(void *arg)
             }
         }
     }
-    #if defined(_WIN32)
+    #if defined(__linux__)
+        close_socket(self->listen_fd);
+    #else
         if (self->id == 0)
         {
             close_socket(self->listen_fd);
         }
-    #else
-        close_socket(self->listen_fd);
     #endif
     self->engine->destroy(self->engine);
     return NULL;    
@@ -119,28 +119,7 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
         return 1;
     }
     
-    #if defined(_WIN32)
-        struct proxy_server srv = {0};
-        if (server_init(&srv, port, ip, timeout) != 0)
-        {
-            write_log(LOG_ERROR, "Failed to init listener socket");
-            return 1;
-        }
-        set_socket_non_blocking(srv.listen_fd);
-        for (int i = 0; i < threads; i++)
-        {
-            workers[i].id = i;
-            workers[i].engine = poll_engine_create();
-            if (workers[i].engine == NULL) return 1;
-            
-            workers[i].listen_fd = srv.listen_fd; // Share the single listener
-            workers[i].engine->add(workers[i].engine, workers[i].listen_fd, ENGINE_READ, NULL);
-            if (pthread_create(&workers[i].thread, &attr, proxy_thread_worker, &workers[i]) != 0)
-            {
-                return 1;
-            }
-        }
-    #else
+    #if defined(__linux__)
         for(int i=0;i<threads;i++)
         {
             workers[i].id = i;
@@ -162,6 +141,27 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
             if (pthread_create(&workers[i].thread, &attr, proxy_thread_worker, &workers[i]) != 0)
             {
                 write_log(LOG_ERROR, "Out of threads.");
+                return 1;
+            }
+        }
+    #else
+        struct proxy_server srv = {0};
+        if (server_init(&srv, port, ip, timeout) != 0)
+        {
+            write_log(LOG_ERROR, "Failed to init listener socket");
+            return 1;
+        }
+        set_socket_non_blocking(srv.listen_fd);
+        for (int i = 0; i < threads; i++)
+        {
+            workers[i].id = i;
+            workers[i].engine = poll_engine_create();
+            if (workers[i].engine == NULL) return 1;
+            
+            workers[i].listen_fd = srv.listen_fd; // Share the single listener
+            workers[i].engine->add(workers[i].engine, workers[i].listen_fd, ENGINE_READ, NULL);
+            if (pthread_create(&workers[i].thread, &attr, proxy_thread_worker, &workers[i]) != 0)
+            {
                 return 1;
             }
         }

@@ -10,7 +10,7 @@ int tls_init(void);
 
 void tls_cleanup(void);
 
-int tls_connect(struct proxy_connection *conn, const char *hostname, bool is_https);
+int tls_connect(struct proxy_connection *conn, const char *hostname);
 
 void conn_close(struct proxy_connection *conn);
 

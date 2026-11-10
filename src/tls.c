@@ -34,65 +34,25 @@ static ssize_t ssl_write_wrapper(struct proxy_connection *conn, void *buf, size_
     return SSL_write((SSL *)conn->upstream_ssl,buf,len);
 }
 
-static ssize_t plain_write_wrapper(struct proxy_connection *conn, void *buf, size_t len)
-{
-    return send(conn->upstream_fd,buf,len,0);
-}
-
 static ssize_t ssl_read_wrapper(struct proxy_connection *conn, void *buf, size_t len)
 {
     return SSL_read((SSL *)conn->upstream_ssl,buf,len);
 }
 
-static ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len)
+int tls_connect(struct proxy_connection *conn, const char *hostname)
 {
-    return recv(conn->upstream_fd,buf,len,0);
-}
-
-int tls_connect(struct proxy_connection *conn, const char *hostname,bool is_https)
-{
-    if(is_https)
+    SSL *ssl = SSL_new(global_ssl_ctx);
+    if(ssl==NULL) return 1;
+    SSL_set_fd(ssl,conn->upstream_fd);
+    SSL_set_tlsext_host_name(ssl,hostname);
+    if(SSL_connect(ssl)<=0)
     {
-        SSL *ssl = SSL_new(global_ssl_ctx);
-        if(ssl==NULL) return 1;
-        SSL_set_fd(ssl,conn->upstream_fd);
-        SSL_set_tlsext_host_name(ssl,hostname);
-        if(SSL_connect(ssl)<=0)
-        {
-            SSL_free(ssl);
-            return 1;
-        }
-        conn->upstream_ssl = ssl;
-        conn->read = ssl_read_wrapper;
-        conn->write = ssl_write_wrapper;
-        return 0;
+        SSL_free(ssl);
+        return 1;
     }
-    else
-    {
-        conn->read = plain_read_wrapper;
-        conn->write = plain_write_wrapper;
-        return 0;
-    }
-}
-
-int conn_write_all(struct proxy_connection *conn, const void *buf, size_t total)
-{
-    size_t sent = 0;
-    while (sent < total) {
-        ssize_t n = conn->write(conn, (char *)buf + sent, total - sent);
-        if (n == -1)
-        {
-            int err = socket_errno;
-            if (err == EAGAIN_COMPAT || err == EWOULDBLOCK_COMPAT)
-                write_log(LOG_WARN, "Upstream server write timed out after 10s.");
-            else if (err == EPIPE || err == ECONNRESET)
-                write_log(LOG_WARN, "Upstream server closed connection unexpectedly.");
-            else
-                perror("send");
-            return 1;
-        }
-        sent += n;
-    }
+    conn->upstream_ssl = ssl;
+    conn->read = ssl_read_wrapper;
+    conn->write = ssl_write_wrapper;
     return 0;
 }
 

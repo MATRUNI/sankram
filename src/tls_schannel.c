@@ -54,15 +54,6 @@ int tls_init(void)
     return 0;
 }
 
-static ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len)
-{
-    return recv(conn->upstream_fd,(char *)buf,(int)len,0);
-}
-
-static ssize_t plain_write_wrapper(struct proxy_connection *conn, void *buf, size_t len)
-{
-    return send(conn->upstream_fd,(char *)buf,(int)len,0);
-}
 void tls_cleanup(void)
 {
     if (cred_initialized) {
@@ -211,14 +202,8 @@ static ssize_t schannel_read_wrapper(struct proxy_connection *conn, void *buf, s
     }
 }
 
-int tls_connect(struct proxy_connection *conn, const char *hostname, bool is_https)
+int tls_connect(struct proxy_connection *conn, const char *hostname)
 {
-    if(!is_https)
-    {
-        conn->read = plain_read_wrapper;
-        conn->write = plain_write_wrapper;
-        return 0;
-    }
     struct win_tls_session *sess = calloc(1, sizeof(struct win_tls_session));
     if (sess == NULL) return 1;
 
@@ -330,24 +315,6 @@ int tls_connect(struct proxy_connection *conn, const char *hostname, bool is_htt
     conn->write = schannel_write_wrapper;
     return 0;
 
-}
-
-int conn_write_all(struct proxy_connection *conn, const void *buf, size_t total)
-{
-    size_t sent = 0;
-    while (sent < total) {
-        ssize_t n = conn->write(conn, (char *)buf + sent, total - sent);
-        if (n <= 0) {
-            int err = socket_errno;
-            if (err == EAGAIN_COMPAT || err == EWOULDBLOCK_COMPAT)
-                write_log(LOG_WARN, "Upstream server write timed out.");
-            else
-                write_log(LOG_WARN, "Upstream server closed connection unexpectedly.");
-            return 1;
-        }
-        sent += n;
-    }
-    return 0;
 }
 
 void conn_close(struct proxy_connection *conn)

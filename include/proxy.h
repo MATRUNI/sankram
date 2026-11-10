@@ -68,6 +68,11 @@ struct client_session {
     struct upstream_pool *pool;
 };
 
+ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len);
+
+ssize_t plain_write_wrapper(struct proxy_connection *conn, void *buf, size_t len);
+
+int conn_write_all(struct proxy_connection *conn, const void *buf, size_t total);
 
 struct client_session *session_create(int client_fd, struct poll_engine *engine);
 

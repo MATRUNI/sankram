@@ -74,7 +74,13 @@ int stress_conn_handle(struct stress_connection *s)
     {
         if(check_socket_connected(s->con.upstream_fd)==0)
         {
-            tls_connect(&s->con, s->worker->url.host, strcmp(s->worker->url.schema, "https") == 0);
+            if(strcmp(s->worker->url.schema, "https") == 0)
+                tls_connect(&s->con, s->worker->url.host);
+            else
+            {
+                s->con.read = plain_read_wrapper;
+                s->con.write = plain_write_wrapper;
+            }
             s->state = CONN_SENDING;
         }
         else

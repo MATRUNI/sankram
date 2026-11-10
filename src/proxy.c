@@ -18,6 +18,37 @@
 
 #define MAX_HEADER_SIZE (65536)
 
+ssize_t plain_write_wrapper(struct proxy_connection *conn, void *buf, size_t len)
+{
+    return send(conn->upstream_fd,buf,len,0);
+}
+
+ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len)
+{
+    return recv(conn->upstream_fd,buf,len,0);
+}
+
+int conn_write_all(struct proxy_connection *conn, const void *buf, size_t total)
+{
+    size_t sent = 0;
+    while (sent < total) {
+        ssize_t n = conn->write(conn, (char *)buf + sent, total - sent);
+        if (n<=0)
+        {
+            int err = socket_errno;
+            if (err == EAGAIN_COMPAT || err == EWOULDBLOCK_COMPAT)
+                write_log(LOG_WARN, "Upstream server write timed out after 10s.");
+            else if (err == EPIPE_COMPAT || err == ECONNRESET_COMPAT)
+                write_log(LOG_WARN, "Upstream server closed connection unexpectedly.");
+            else
+                perror("send");
+            return 1;
+        }
+        sent += n;
+    }
+    return 0;
+}
+
 static int upstream_pool_get(struct upstream_pool *pool, const char *host, const char *port, int *fd, void **upstream_ssl,ssize_t (**read_fn)(struct proxy_connection *, void *, size_t),ssize_t (**write_fn)(struct proxy_connection *, void *, size_t))
 {
     if (pool == NULL || pool->count < 0 || pool->count > UPSTREAM_POOL_MAX) 
@@ -256,8 +287,6 @@ int proxy_handle_client(struct client_session *session)
                 session->capacity = capacity;
                 session->buffer = buffer;
                 return PROXY_AGAIN;
-            } else {
-                perror("recv");
             }
             return res;
         }
@@ -395,13 +424,20 @@ int proxy_handle_client(struct client_session *session)
     session->engine->del(session->engine,session->con.upstream_fd);
     set_socket_blocking(session->con.upstream_fd);
     set_socket_timeout(session->con.upstream_fd);
-    bool is_https = (strcasecmp(session->url.schema,"https")==0);
-    
-    if(tls_connect(&session->con,session->url.host,is_https)==1)
+    if(strcasecmp(session->url.schema,"https")==0)
     {
-        send_client_error(client_fd, 502, "TLS/SSL handshake with target server failed\n");
-        goto cleanup_con;
+        if(tls_connect(&session->con,session->url.host)==1)
+        {
+            send_client_error(client_fd, 502, "TLS/SSL handshake with target server failed\n");
+            goto cleanup_con;
+        }
     }
+    else
+    {
+        session->con.read = plain_read_wrapper;
+        session->con.write = plain_write_wrapper;
+    }
+    
 
     snprintf(session->upstream_host, sizeof(session->upstream_host), "%s", session->url.host);
     snprintf(session->upstream_port, sizeof(session->upstream_port), "%s", session->url.port);
