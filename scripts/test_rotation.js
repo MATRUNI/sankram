@@ -31,7 +31,7 @@ async function waitForProxy(port, maxTries = 30) {
   for (let i = 0; i < maxTries; i++) {
     try {
       await new Promise((resolve, reject) => {
-        const req = http.get(`http://127.0.0.1:${port}/health`, res => {
+        const req = http.get(`http://127.0.0.1:${port}/?url=http://127.0.0.1:${MOCK_PORT}/health`, res => {
           res.resume();
           resolve();
         });

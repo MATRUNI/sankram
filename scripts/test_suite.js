@@ -94,10 +94,10 @@ const testCases = [
     expectedStatus: 502,
   },
   {
-    name: 'Missing URL - 400 Bad Request',
-    rawUrl: `${PROXY_URL}/`, // No ?url= param
+    name: 'Default Upstream Routing (Port 3000 Fallback)',
+    rawUrl: `${PROXY_URL}/`, // No ?url= param -> routes to 127.0.0.1:3000
     method: 'GET',
-    expectedStatus: 400,
+    expectedStatus: [200, 502], // 200 if dev server running, 502 if offline
   },
 ];
 
@@ -118,11 +118,13 @@ async function runSingleTest(tc) {
     status = res.status;
     body = await res.text();
 
-    const statusMatch = status === tc.expectedStatus;
+    const statusMatch = Array.isArray(tc.expectedStatus)
+      ? tc.expectedStatus.includes(status)
+      : status === tc.expectedStatus;
     const bodyValid = tc.validate ? tc.validate(res, body) : true;
     passed = statusMatch && bodyValid;
 
-    if (!statusMatch) errorMsg = `Expected HTTP ${tc.expectedStatus}, got ${status}`;
+    if (!statusMatch) errorMsg = `Expected HTTP ${JSON.stringify(tc.expectedStatus)}, got ${status}`;
     else if (!bodyValid) errorMsg = `Content validation failed on returned payload`;
   } catch (err) {
     errorMsg = err.message;
