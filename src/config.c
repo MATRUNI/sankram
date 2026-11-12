@@ -24,11 +24,36 @@ static long get_online_cores(void)
     return online_core;
 }
 
+static void parse_origins_list(const char *val, struct origin_whitelist *wl)
+{
+    if (val == NULL || wl == NULL) return;
+    
+    wl->count = 0;
+
+    const char *p = val;
+    while (*p != '\0' && wl->count < MAX_ALLOWED_ORIGINS)
+    {
+        while (*p == ' ' || *p == '\t' || *p == ',') p++;
+        if (*p == '\0') break;
+
+        const char *start = p;
+        while (*p != '\0' && *p != ',' && *p != ' ' && *p != '\t') p++;
+        size_t len = (size_t)(p - start);
+
+        if (len > 0 && len < MAX_ORIGIN_LEN)
+        {
+            strncpy(wl->origins[wl->count], start, len);
+            wl->origins[wl->count][len] = '\0';
+            wl->count++;
+        }
+    }
+}
+
 int parse_config(int argc, char **argv, struct proxy_config *config)
 {
     for(int i=1;i<argc;i++)
     {
-        if (strcasecmp(argv[i], "-p") == 0)
+        if (strcasecmp(argv[i], "-p") == 0 || strcasecmp(argv[i], "--port") == 0)
         {
             if (i + 1 < argc)
             {
@@ -98,6 +123,13 @@ int parse_config(int argc, char **argv, struct proxy_config *config)
         {
             config->verbose = true;
             change_log_level(LOG_DEBUG);    
+        }
+        else if (strcasecmp(argv[i], "-o") == 0 || strcasecmp(argv[i], "--origin") == 0 || strcasecmp(argv[i], "--origins") == 0)
+        {
+            if (i + 1 < argc)
+            {
+                parse_origins_list(argv[++i], &config->whitelist);
+            }
         }
         else if (strcasecmp(argv[i], "-b") == 0 || strcasecmp(argv[i], "--bind") == 0)
         {
@@ -315,6 +347,10 @@ void make_changes(char *key, char *val, struct proxy_config *config)
                 config->max_log_files = (size_t) value;
         }
         return;
+    }
+    else if (strcasecmp(key, "allowed_origins") == 0 || strcasecmp(key, "origins") == 0 || strcasecmp(key, "origin") == 0)
+    {
+        parse_origins_list(val, &config->whitelist);
     }
     else if(strcasecmp(key,"max_log_size")==0)
     {

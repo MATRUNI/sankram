@@ -18,6 +18,36 @@
 
 #define MAX_HEADER_SIZE (65536)
 
+static bool match_wildcard(const char *pattern, const char *str)
+{
+    const char *p_star = NULL;
+    const char *s_star = NULL;
+
+    while (*str)
+    {
+        if (*pattern == '*')
+        {
+            p_star = pattern++;
+            s_star = str;
+        }
+        else if (tolower((unsigned char)*pattern) == tolower((unsigned char)*str))
+        {
+            pattern++;
+            str++;
+        }
+        else if (p_star != NULL)
+        {
+            pattern = p_star + 1;
+            str = ++s_star;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    while (*pattern == '*') pattern++;
+    return *pattern == '\0';
+}
 ssize_t plain_write_wrapper(struct proxy_connection *conn, void *buf, size_t len)
 {
     return send(conn->upstream_fd,buf,len,0);
@@ -205,16 +235,34 @@ void session_free(struct client_session *session)
     free(session);
 }
 
-static int handle_options_request(int client_fd)
+static bool is_origin_allowed(const char *origin, const struct origin_whitelist *wl)
 {
-    const char *preflight_response = 
+    if (origin == NULL) return true; // CLI tools (curl, wrk) don't send Origin; allow them
+    if (wl == NULL || wl->count == 0) return true; // Whitelist disabled or empty
+
+    for (size_t i = 0; i < wl->count; i++)
+    {
+        if (match_wildcard(wl->origins[i],origin))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int handle_options_request(int client_fd, const char *origin)
+{
+    char preflight_response[512];
+    snprintf(preflight_response, sizeof(preflight_response),
         "HTTP/1.1 204 No Content\r\n"
-        "Access-Control-Allow-Origin: *\r\n"
-        "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+        "Access-Control-Allow-Origin: %s\r\n"
+        "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS\r\n"
         "Access-Control-Allow-Headers: *\r\n"
+        "Access-Control-Allow-Private-Network: true\r\n"
         "Content-Length: 0\r\n"
         "Connection: close\r\n"
-        "\r\n";
+        "\r\n",
+        origin ? origin : "*");
     
     return send_all(client_fd, preflight_response, strlen(preflight_response));
 }
@@ -237,7 +285,7 @@ int proxy_handle_client(struct client_session *session)
     char *buffer = session->buffer;
     size_t total= session->total;
     size_t capacity= session->capacity;
-
+    const char *origin = NULL;
     char *headers_end = (session->offset > 0) ? (buffer + session->offset) : NULL;
 
     switch (session->level)
@@ -315,9 +363,16 @@ int proxy_handle_client(struct client_session *session)
         return res;
     }
 
+    origin = get_header_value(&session->req.headers,"Origin");
+    if(!is_origin_allowed(origin,session->whitelist))
+    {
+        write_log(LOG_WARN, "Blocked request from untrusted origin: %s", origin);
+        send_client_error(client_fd, 403, "Origin forbidden by proxy policy\n");
+        goto cleanup_req;
+    }
     if(strcasecmp(session->req.method,"OPTIONS")==0)
     {
-        if(handle_options_request(client_fd)==1)
+        if(handle_options_request(client_fd,origin)==1)
         {
             goto cleanup_req;
         }
@@ -355,7 +410,15 @@ int proxy_handle_client(struct client_session *session)
         target = get_header_value(&session->req.headers, "X-Target-Url");
     }
 
-    if(target==NULL || parse_url((char *)target,&session->url)==1)
+    if(target==NULL)
+    {
+        strcpy(session->url.host,"127.0.0.1");
+        strcpy(session->url.schema,"http");
+        strcpy(session->url.port,"3000");
+        strncpy(session->url.path, session->req.path, sizeof(session->url.path) - 1);
+        session->url.path[sizeof(session->url.path) - 1] = '\0';
+    }
+    else if(parse_url((char *)target,&session->url)==1)
     {
         write_log(LOG_WARN, "Invalid or missing target URL.");
         send_client_error(client_fd, 400, "Invalid or missing target URL format\n");
@@ -414,7 +477,7 @@ int proxy_handle_client(struct client_session *session)
     
     LEVEL_UPSTREAM_CONNECT:
     headers_end = buffer + session->offset;
-
+    origin = get_header_value(&session->req.headers, "Origin");
     if(check_socket_connected(session->con.upstream_fd)!=0)
     {
         send_client_error(client_fd, 502, "TLS/SSL handshake with target server failed\n");
@@ -487,7 +550,7 @@ int proxy_handle_client(struct client_session *session)
 
     set_socket_blocking(session->con.client_fd);
     set_socket_timeout(session->con.client_fd);
-    int res_err = receiveHTTPResponse(&session->con,!keep_alive);
+    int res_err = receiveHTTPResponse(&session->con,!keep_alive,origin);
     set_socket_non_blocking(session->con.client_fd);
 
     if (res_err == 1)

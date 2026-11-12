@@ -21,6 +21,7 @@ struct worker_context {
     int listen_fd;
     pthread_t thread;
     struct upstream_pool pool;
+    const struct origin_whitelist *whitelist;
 };
 
 #define MAX_EVENTS 64
@@ -74,6 +75,7 @@ static void *proxy_thread_worker(void *arg)
                         continue;
                     }
                     ses->pool = &self->pool;
+                    ses->whitelist = self->whitelist;
                     self->engine->add(self->engine,client_fd,ENGINE_READ | ENGINE_ONESHOT,ses);
                 }
             }
@@ -111,7 +113,7 @@ static void destroy_worker_thread_attr(void)
     pthread_attr_destroy(&attr);
 }
 
-static int spawn_worker_fleet(struct worker_context *workers, int threads,int port, const char *ip, int timeout)
+static int spawn_worker_fleet(struct worker_context *workers, int threads,int port, const char *ip, int timeout,const struct origin_whitelist *whitelist)
 {
     if(workers == NULL)
     {
@@ -123,6 +125,7 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
         for(int i=0;i<threads;i++)
         {
             workers[i].id = i;
+            workers[i].whitelist = whitelist;
             workers[i].engine = poll_engine_create();
             if (workers[i].engine == NULL) 
             {
@@ -155,6 +158,7 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
         for (int i = 0; i < threads; i++)
         {
             workers[i].id = i;
+            workers[i].whitelist = whitelist;
             workers[i].engine = poll_engine_create();
             if (workers[i].engine == NULL) return 1;
             
@@ -188,7 +192,7 @@ static int run_server(const struct proxy_config *config)
     #endif
     get_worker_thread_attr();
     struct worker_context *workers = calloc(config->threads,sizeof(struct worker_context));
-    if(spawn_worker_fleet(workers,(int)config->threads,config->port,config->listen_ip,config->timeout)==1)
+    if(spawn_worker_fleet(workers,(int)config->threads,config->port,config->listen_ip,config->timeout,(const struct origin_whitelist *)&config->whitelist)==1)
     {
         put_to_sleep();
     }
@@ -246,7 +250,11 @@ int main(int argc, char *argv[])
         .timeout = 10,
         .max_log_files = 5,
         .max_log_size = 2*1024*1024,
-        .log_dir = "logs"
+        .log_dir = "logs",
+        .whitelist = {
+            .origins = {"https://api-os.pages.dev"},
+            .count = 1
+        }
     };
     FILE *config_file = fopen("proxy.conf","r");
     if(config_file!=NULL)

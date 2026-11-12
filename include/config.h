@@ -6,7 +6,14 @@
 #define THREAD_STACK_SIZE (256 * 1024)
 #define LOGGER_THREAD_STACK_SIZE (32 * 1024)
 #define PROXY_TIMEOUT_SEC 10
+#define MAX_ALLOWED_ORIGINS 16
+#define MAX_ORIGIN_LEN 128
 
+struct origin_whitelist {
+    char origins[MAX_ALLOWED_ORIGINS][MAX_ORIGIN_LEN];
+    int default_upstream_port;
+    size_t count;
+};
 enum proxy_mode
 {
     MODE_SERVER,
@@ -26,6 +33,7 @@ struct proxy_config
     int max_log_files;
     char log_dir[128];
 
+    struct origin_whitelist whitelist;
     struct stress_config stress;
 };
 

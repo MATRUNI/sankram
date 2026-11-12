@@ -53,16 +53,8 @@ static int add_header(char *line, struct http_header *h)
 {
     if (line == NULL || h == NULL) return 1;
     char *colon = strchr(line, ':');
-    if (colon == NULL) return 1;
+    if (colon == NULL || colon==line || colon[-1]== ' ' || colon[-1]=='\t') return 1;
     *colon = '\0';
-    if (colon > line && (colon[-1]==' ' || colon[-1]=='\t'))
-    {
-        char *end = colon - 1;
-        while (end >= line && (*end == ' ' || *end == '\t'))
-        {
-            *end-- = '\0';
-        }
-    }
 
     h->name = line;
     h->value = trim(colon + 1);

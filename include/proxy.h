@@ -12,7 +12,6 @@
 
 #define UPSTREAM_POOL_MAX 64
 #define UPSTREAM_IDLE_TIMEOUT_MS 10000  // 10 seconds
-
 struct proxy_connection
 {
     int client_fd;
@@ -66,6 +65,7 @@ struct client_session {
     bool upstream_is_https;
     char initial_buffer[4096];
     struct upstream_pool *pool;
+    const struct origin_whitelist *whitelist;
 };
 
 ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len);

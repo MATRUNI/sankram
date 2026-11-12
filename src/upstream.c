@@ -189,7 +189,7 @@ int sendHTTPRequest(struct proxy_connection *con, struct http_request *req, stru
     return conn_write_all(con, request, offset);
 }
 
-int receiveHTTPResponse(struct proxy_connection *con, bool client_close)
+int receiveHTTPResponse(struct proxy_connection *con, bool client_close, const char *origin)
 {
     int return_code = 1;
     char stack_buf[4096];
@@ -269,10 +269,32 @@ int receiveHTTPResponse(struct proxy_connection *con, bool client_close)
             }
         }
     }
+    char *has_cors = strcasestr(buffer, "\naccess-control-allow-origin:");
+    bool need_cors = (origin != NULL && (has_cors == NULL || has_cors >= headers_end));
 
-    size_t to_send = headers_len + initial_body;
-    if (send_all(con->client_fd, buffer, to_send) == 1)
-        goto cleanup_buffer;
+    if (need_cors)
+    {
+        size_t prefix_len = (size_t)(headers_end + 2 - buffer);
+        if (send_all(con->client_fd, buffer, prefix_len) == 1)
+            goto cleanup_buffer;
+
+        char cors_buf[256];
+        int clen = snprintf(cors_buf, sizeof(cors_buf),
+            "Access-Control-Allow-Origin: %s\r\n"
+            "Access-Control-Allow-Private-Network: true\r\n"
+            "\r\n", origin);
+        if (send_all(con->client_fd, cors_buf, clen) == 1)
+            goto cleanup_buffer;
+
+        if (initial_body > 0 && send_all(con->client_fd, headers_end + 4, initial_body) == 1)
+            goto cleanup_buffer;
+    }
+    else
+    {
+        size_t to_send = headers_len + initial_body;
+        if (send_all(con->client_fd, buffer, to_send) == 1)
+            goto cleanup_buffer;
+    }
 
     if (content_length > 0)
     {
