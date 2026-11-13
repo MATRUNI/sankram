@@ -33,19 +33,6 @@ jobs:
           ls -lh build/sankram build/sankram_small
           size build/sankram build/sankram_small
 
-      - name: Run Real-World Integration Test Suite
-        run: |
-          ./build/sankram -p 17777 -l error -t 4 &
-          PROXY_PID=$!
-          sleep 1
-          node scripts/test_suite.js
-          kill -SIGINT $PROXY_PID 2>/dev/null || true
-
-      - name: Run Carousel Log Rotation Test Suite
-        run: |
-          rm -rf logs && mkdir -p logs
-          node scripts/test_rotation.js
-
       - name: Run CI Benchmark & Publish Summary
         run: |
           mkdir -p logs
@@ -89,19 +76,6 @@ jobs:
       - name: Check binary size
         run: ls -lh build/sankram build/sankram_small
 
-      - name: Run Real-World Integration Test Suite
-        run: |
-          ./build/sankram -p 17777 -l error -t 4 &
-          PROXY_PID=$!
-          sleep 1
-          node scripts/test_suite.js
-          kill -SIGINT $PROXY_PID 2>/dev/null || true
-
-      - name: Run Carousel Log Rotation Test Suite
-        run: |
-          rm -rf logs && mkdir -p logs
-          node scripts/test_rotation.js
-
       - name: Run CI Benchmark & Publish Summary
         run: |
           mkdir -p logs
@@ -144,29 +118,15 @@ jobs:
           ./build/sankram_small.exe -h
           Get-ChildItem build/*.exe | Select-Object Name, @{Name="Size(KB)";Expression={[math]::Round($_.Length/1KB, 1)}}
 
-      - name: Run Real-World Integration Test Suite
+      - name: Run Unified Test Suite
         shell: pwsh
-        run: |
-          $proc = Start-Process -FilePath ".\build\sankram.exe" -ArgumentList "-p 17777 -l error -t 4" -PassThru
-          Start-Sleep -Seconds 2
-          try {
-            node scripts/test_suite.js
-          } finally {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          }
-
-      - name: Run Carousel Log Rotation Test Suite
-        shell: pwsh
-        run: |
-          if (Test-Path logs) { Remove-Item -Recurse -Force logs }
-          New-Item -ItemType Directory -Path logs | Out-Null
-          node scripts/test_rotation.js
+        run: python scripts/tests/run_all.py
 
       - name: Run CI Benchmark & Publish Summary
         shell: pwsh
         run: |
-          # 1. Start Node.js clustered mock upstream server (4 workers)
-          $mockProc = Start-Process -FilePath "node" -ArgumentList "scripts/mock_upstream.js" -PassThru
+          # 1. Start Python mock upstream server
+          $mockProc = Start-Process -FilePath "python" -ArgumentList "scripts/mock_upstream.py" -PassThru
 
           # 2. Start Sankram proxy (16 threads matching Linux/macOS)
           $proxyProc = Start-Process -FilePath ".\build\sankram.exe" -ArgumentList "-p 17777 -l error -t 16" -PassThru
@@ -197,5 +157,5 @@ jobs:
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "| **Compact (-Os)** | WSAPoll | $([math]::Round($sizeOpt, 1)) KB | — | ✅ Passed |"
           } finally {
             Stop-Process -Id $proxyProc.Id -Force -ErrorAction SilentlyContinue
-            Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
