@@ -153,6 +153,7 @@ struct client_session *session_create(int client_fd,struct poll_engine *engine)
     session->con.upstream_fd = -1;
     session->level = LEVEL_CLIENT_READ_HEADERS;
     session->capacity = sizeof(session->initial_buffer);
+    session->is_websocket = false;
     session->total = 0;
     session->offset = 0;
     session->buffer = session->initial_buffer;
@@ -182,6 +183,7 @@ static void session_reset(struct client_session *session)
     session->con.body_bytes_sent = 0;
 
     session->level = LEVEL_CLIENT_READ_HEADERS;
+    session->is_websocket = false;
     session->total = 0;
     session->offset = 0;
     if (session->buffer != session->initial_buffer)
@@ -285,7 +287,7 @@ int proxy_handle_client(struct client_session *session)
     char *buffer = session->buffer;
     size_t total= session->total;
     size_t capacity= session->capacity;
-    const char *origin = NULL;
+    const char *origin = session->req.headers.fast.origin;
     char *headers_end = (session->offset > 0) ? (buffer + session->offset) : NULL;
 
     switch (session->level)
@@ -294,7 +296,8 @@ int proxy_handle_client(struct client_session *session)
             goto LEVEL_CLIENT_READ_HEADERS;
         case LEVEL_UPSTREAM_CONNECT:
             goto LEVEL_UPSTREAM_CONNECT;
-        
+        case LEVEL_WEBSOCKET_TUNNEL:
+            goto LEVEL_WEBSOCKET_TUNNEL;
         default:
             break;
     }
@@ -363,7 +366,8 @@ int proxy_handle_client(struct client_session *session)
         return res;
     }
 
-    origin = get_header_value(&session->req.headers,"Origin");
+    origin = session->req.headers.fast.origin;
+    write_log(LOG_DEBUG, "Client (fd=%d) Origin: '%s' matched whitelist", client_fd, origin ? origin : "(none/CLI)");
     if(!is_origin_allowed(origin,session->whitelist))
     {
         write_log(LOG_WARN, "Blocked request from untrusted origin: %s", origin);
@@ -379,7 +383,13 @@ int proxy_handle_client(struct client_session *session)
         res = 0;
         goto cleanup_req;
     }
-    
+
+    if (session->req.headers.fast.upgrade != NULL && session->req.headers.fast.connection != NULL &&
+        strcasestr(session->req.headers.fast.upgrade, "websocket") != NULL && strcasestr(session->req.headers.fast.connection, "upgrade") != NULL)
+        session->is_websocket = true;
+    if (session->is_websocket) {
+        write_log(LOG_DEBUG, "Client (fd=%d) requested WebSocket Upgrade", client_fd);
+    }
     if (session->req.method[0] != 'G' || strcmp(session->req.method, "GET") != 0)
     {
         if (strcmp(session->req.method, "POST") != 0 &&
@@ -417,6 +427,7 @@ int proxy_handle_client(struct client_session *session)
         strcpy(session->url.port,"3000");
         strncpy(session->url.path, session->req.path, sizeof(session->url.path) - 1);
         session->url.path[sizeof(session->url.path) - 1] = '\0';
+        write_log(LOG_DEBUG, "No ?url= query param; falling back to default upstream %s:%s", session->url.host, session->url.port);
     }
     else if(parse_url((char *)target,&session->url)==1)
     {
@@ -424,6 +435,7 @@ int proxy_handle_client(struct client_session *session)
         send_client_error(client_fd, 400, "Invalid or missing target URL format\n");
         goto cleanup_req;
     }
+    write_log(LOG_DEBUG, "Routing to target: %s://%s:%s%s", session->url.schema, session->url.host, session->url.port, session->url.path);
     if (strcmp(session->url.host, "127.0.0.1") == 0 ||
         strcasecmp(session->url.host, "localhost") == 0 ||
         strcmp(session->url.host, "0.0.0.0") == 0)
@@ -477,13 +489,13 @@ int proxy_handle_client(struct client_session *session)
     
     LEVEL_UPSTREAM_CONNECT:
     headers_end = buffer + session->offset;
-    origin = get_header_value(&session->req.headers, "Origin");
+    
+    origin = session->req.headers.fast.origin;
     if(check_socket_connected(session->con.upstream_fd)!=0)
     {
         send_client_error(client_fd, 502, "TLS/SSL handshake with target server failed\n");
         goto cleanup_con;
     }
-    // epoll_ctl(session->epoll_fd, EPOLL_CTL_DEL, session->con.upstream_fd, NULL);
     session->engine->del(session->engine,session->con.upstream_fd);
     set_socket_blocking(session->con.upstream_fd);
     set_socket_timeout(session->con.upstream_fd);
@@ -512,7 +524,7 @@ int proxy_handle_client(struct client_session *session)
         goto cleanup_con;
     }
 
-    const char *len_str = get_header_value(&session->req.headers, "Content-Length");
+    const char *len_str = session->req.headers.fast.content_length;
     if (len_str != NULL)
     {
         long content_length = strtol(len_str, NULL, 10);
@@ -530,7 +542,7 @@ int proxy_handle_client(struct client_session *session)
         }
     }
     
-    const char *client_conn = get_header_value(&session->req.headers, "Connection");
+    const char *client_conn = session->req.headers.fast.connection;
     bool keep_alive = true;
     if (client_conn != NULL && strcasecmp(client_conn, "close") == 0)
     {
@@ -551,6 +563,17 @@ int proxy_handle_client(struct client_session *session)
     set_socket_blocking(session->con.client_fd);
     set_socket_timeout(session->con.client_fd);
     int res_err = receiveHTTPResponse(&session->con,!keep_alive,origin);
+    if (session->is_websocket && session->con.status_code == 101)
+    {
+        write_log(LOG_INFO, "Upgraded connection to WebSocket tunnel for %s", session->url.host);
+        session->level = LEVEL_WEBSOCKET_TUNNEL;
+        write_log(LOG_DEBUG, "Active WebSocket tunnel bridged: client (fd=%d) <--> upstream (fd=%d)", session->con.client_fd, session->con.upstream_fd);
+        set_socket_non_blocking(session->con.client_fd);
+        set_socket_non_blocking(session->con.upstream_fd);
+        session->engine->add(session->engine, session->con.upstream_fd, ENGINE_READ | ENGINE_ONESHOT, session);
+        session->engine->mod(session->engine, session->con.client_fd, ENGINE_READ | ENGINE_ONESHOT, session);
+        return PROXY_AGAIN;
+    }
     set_socket_non_blocking(session->con.client_fd);
 
     if (res_err == 1)
@@ -566,14 +589,66 @@ int proxy_handle_client(struct client_session *session)
                   (unsigned long)session->con.body_bytes_sent, (unsigned long long)latency_ms);
     }
 
-    // Keep-alive is safe when response boundary is known (Content-Length or 204/304)
     if (keep_alive)
     {
         session_reset(session);
+        write_log(LOG_DEBUG, "Session reset for keep-alive reuse (client_fd=%d)", client_fd);
         return PROXY_AGAIN;
     }
     res = PROXY_DONE;
     goto cleanup_url;
+
+    LEVEL_WEBSOCKET_TUNNEL:
+    {
+        char ws_buf[8192];
+        int c_fd = session->con.client_fd;
+
+        while (1)
+        {
+            ssize_t n = recv(c_fd, ws_buf, sizeof(ws_buf), 0);
+            if (n > 0)
+            {
+                if (conn_write_all(&session->con, ws_buf, (size_t)n) != 0)
+                    goto cleanup_tunnel;
+            }
+            else if (n == 0)
+                goto cleanup_tunnel;
+            else
+            {
+                int err = socket_errno;
+                if (err != EAGAIN_COMPAT && err != EWOULDBLOCK_COMPAT)
+                    goto cleanup_tunnel;
+                break;
+            }
+        }
+
+        while (1)
+        {
+            ssize_t n = session->con.read(&session->con, ws_buf, sizeof(ws_buf));
+            if (n > 0)
+            {
+                if (send_all(c_fd, ws_buf, (size_t)n) != 0)
+                    goto cleanup_tunnel;
+            }
+            else if (n == 0)
+                goto cleanup_tunnel;
+            else
+            {
+                int err = socket_errno;
+                if (err != EAGAIN_COMPAT && err != EWOULDBLOCK_COMPAT)
+                    goto cleanup_tunnel;
+                break;
+            }
+        }
+        session->engine->mod(session->engine, c_fd, ENGINE_READ | ENGINE_ONESHOT, session);
+        session->engine->mod(session->engine, session->con.upstream_fd, ENGINE_READ | ENGINE_ONESHOT, session);
+        return PROXY_AGAIN;
+
+    cleanup_tunnel:
+        write_log(LOG_DEBUG, "WebSocket tunnel closed for client (fd=%d)", session->con.client_fd);
+        conn_close(&session->con);
+        return PROXY_DONE;
+    }
     cleanup_con:
     conn_close(&session->con);
     cleanup_url:

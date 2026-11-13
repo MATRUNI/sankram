@@ -9,12 +9,22 @@ struct http_header
     char *value;
 };
 
+struct fast_headers {
+    const char *host;
+    const char *connection;
+    const char *upgrade;
+    const char *origin;
+    const char *content_length;
+    const char *sec_websocket_key;
+};
+
 struct http_headers
 {
     struct http_header *items;
     size_t count;
     size_t capacity;
     struct http_header inline_items[HTTP_MAX_INLINE_HEADERS];
+    struct fast_headers fast;
 };
 
 struct http_request

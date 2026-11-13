@@ -296,6 +296,13 @@ int receiveHTTPResponse(struct proxy_connection *con, bool client_close, const c
             goto cleanup_buffer;
     }
 
+    if (con->status_code == 101 || con->status_code == 204 || con->status_code == 304)
+    {
+        con->body_bytes_sent = 0;
+        return_code = 0;
+        goto cleanup_buffer;
+    }
+    
     if (content_length > 0)
     {
         con->body_bytes_sent = (size_t)content_length;
