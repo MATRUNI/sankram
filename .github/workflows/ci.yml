@@ -38,16 +38,14 @@ jobs:
           mkdir -p logs
           # Benchmark standard (-O3) binary
           echo "Running standard (-O3) benchmark..."
-          OUTPUT_STD=$(SANKRAM_BIN=build/sankram ./scripts/benchmark_50k.sh 20000 50)
-          echo "$OUTPUT_STD"
-          RPS_STD=$(echo "$OUTPUT_STD" | grep "Throughput:" | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+          SANKRAM_BIN=build/sankram ./scripts/benchmark_50k.sh 20000 50 | tee logs/bench_std.log
+          RPS_STD=$(grep "Throughput:" logs/bench_std.log | grep -oE '[0-9]+\.[0-9]+' | head -n1)
           SIZE_STD=$(ls -lh build/sankram | awk '{print $5}')
 
           # Benchmark compact (-Os) binary
           echo "Running compact (-Os) benchmark..."
-          OUTPUT_OPT=$(SANKRAM_BIN=build/sankram_small ./scripts/benchmark_50k.sh 20000 50)
-          echo "$OUTPUT_OPT"
-          RPS_OPT=$(echo "$OUTPUT_OPT" | grep "Throughput:" | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+          SANKRAM_BIN=build/sankram_small ./scripts/benchmark_50k.sh 20000 50 | tee logs/bench_small.log
+          RPS_OPT=$(grep "Throughput:" logs/bench_small.log | grep -oE '[0-9]+\.[0-9]+' | head -n1)
           SIZE_OPT=$(ls -lh build/sankram_small | awk '{print $5}')
 
           # Publish Markdown Table to GitHub Step Summary
@@ -80,9 +78,8 @@ jobs:
         run: |
           mkdir -p logs
           echo "Running macOS (kqueue) benchmark..."
-          OUTPUT=$(SANKRAM_BIN=build/sankram ./scripts/benchmark_50k.sh 20000 50)
-          echo "$OUTPUT"
-          RPS=$(echo "$OUTPUT" | grep "Throughput:" | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+          SANKRAM_BIN=build/sankram ./scripts/benchmark_50k.sh 20000 50 | tee logs/bench_macos.log
+          RPS=$(grep "Throughput:" logs/bench_macos.log | grep -oE '[0-9]+\.[0-9]+' | head -n1)
           SIZE=$(ls -lh build/sankram | awk '{print $5}')
 
           echo "## 🍏 macOS (kqueue) Benchmark Results" >> $GITHUB_STEP_SUMMARY
@@ -135,8 +132,8 @@ jobs:
           Start-Sleep -Seconds 2
 
           try {
-            # 3. Warm-up run (20,000 reqs with 8 client threads)
-            .\build\sankram.exe -m stress -u "http://127.0.0.1:17777/?url=http%3A%2F%2F127.0.0.1%3A9099%2F" -c 50 -n 20000 -t 8 | Out-Null
+            # 3. Warm-up run (2,000 reqs with 8 client threads)
+            .\build\sankram.exe -m stress -u "http://127.0.0.1:17777/?url=http%3A%2F%2F127.0.0.1%3A9099%2F" -c 50 -n 2000 -t 8 | Out-Null
 
             # 4. Benchmark run (20,000 reqs with 8 client threads)
             $benchOut = .\build\sankram.exe -m stress -u "http://127.0.0.1:17777/?url=http%3A%2F%2F127.0.0.1%3A9099%2F" -c 50 -n 20000 -t 8 | Out-String
