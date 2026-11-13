@@ -26,6 +26,12 @@ CONFIG_PATH = os.path.abspath("proxy.conf")
 CONCURRENCY = 25
 
 class MockHandler(BaseHTTPRequestHandler):
+    def handle(self):
+        try:
+            super().handle()
+        except Exception:
+            pass
+
     def do_GET(self):
         body = b'{"status":"ok","proxy":"c"}'
         try:
@@ -35,10 +41,18 @@ class MockHandler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except Exception:
             pass
 
     def log_message(self, format, *args):
+        pass
+
+class MockServer(ThreadingHTTPServer):
+    request_queue_size = 512
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
         pass
 
 def get_logs_status():
@@ -111,7 +125,7 @@ def main():
     print("=" * 64)
 
     # 1. Start Multi-Threaded Mock Server
-    mock_server = ThreadingHTTPServer(("127.0.0.1", MOCK_PORT), MockHandler)
+    mock_server = MockServer(("127.0.0.1", MOCK_PORT), MockHandler)
     server_thread = threading.Thread(target=mock_server.serve_forever, daemon=True)
     server_thread.start()
 
