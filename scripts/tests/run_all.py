@@ -13,6 +13,11 @@ import sys
 import time
 import subprocess
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
 C_GREEN = "\033[32m"
@@ -65,7 +70,9 @@ def main():
         print(f"\n{C_BOLD}>>> [{idx}/{len(SUITES)}] Running {s['name']}...{C_RESET}")
         start_time = time.perf_counter()
         
-        proc = subprocess.run([sys.executable, s["script"]])
+        child_env = os.environ.copy()
+        child_env["PYTHONIOENCODING"] = "utf-8"
+        proc = subprocess.run([sys.executable, s["script"]], env=child_env)
         duration = time.perf_counter() - start_time
         passed = (proc.returncode == 0)
         

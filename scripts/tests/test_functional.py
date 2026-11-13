@@ -17,6 +17,11 @@ import urllib.error
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 PROXY_PORT = 17777
 PROXY_URL = f"http://127.0.0.1:{PROXY_PORT}"
 REPORT_FILE = "logs/test_suite_report.log"

@@ -4,13 +4,18 @@ Sankram Proxy - Automated WebSocket Tunneling Test Suite
 Validates RFC 6455 Handshake, CORS & PNA injection, and Full-Duplex Echo Framing.
 """
 
+import sys
 import socket
 import threading
 import time
 import base64
 import hashlib
-import sys
 import subprocess
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 WS_MAGIC = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MOCK_PORT = 3000

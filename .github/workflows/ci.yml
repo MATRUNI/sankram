@@ -120,6 +120,8 @@ jobs:
 
       - name: Run Unified Test Suite
         shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
         run: python scripts/tests/run_all.py
 
       - name: Run CI Benchmark & Publish Summary

@@ -14,9 +14,15 @@ import subprocess
 import threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 MOCK_PORT = 9099
 PROXY_PORT = 17777
 LOGS_DIR = os.path.abspath("logs")
+CONFIG_PATH = os.path.abspath("proxy.conf")
 CONCURRENCY = 25
 
 class MockHandler(BaseHTTPRequestHandler):
@@ -116,7 +122,10 @@ def main():
         status_tag = "(ACTIVE)" if f["active"] else ""
         print(f"  - {f['name']:<20} : {f['size'] / 1024.0:.1f} KB {status_tag}")
 
-    # 2. Start Proxy
+    # 2. Configure 50KB rotation threshold and start Proxy
+    with open(CONFIG_PATH, "w") as f:
+        f.write("max_log_size = 50KB\n")
+
     bin_path = "./build/sankram.exe" if sys.platform == "win32" else "./build/sankram"
     if not os.path.exists(bin_path):
         bin_path = "./build/api"
@@ -157,9 +166,9 @@ def main():
             current_status = get_logs_status()
             current_active = current_status["active_file"]
             active_obj = next((f for f in current_status["files"] if f["active"]), None)
-            active_size = f"{active_obj['size'] / (1024 * 1024):.2f}" if active_obj else "0"
+            active_size_kb = (active_obj['size'] / 1024.0) if active_obj else 0.0
 
-            sys.stdout.write(f"\rSent: {sent} reqs | Active: {current_active} ({active_size} MB / 2.00 MB)")
+            sys.stdout.write(f"\rSent: {sent} reqs | Active: {current_active} ({active_size_kb:.1f} KB / 50.0 KB)")
             sys.stdout.flush()
 
             if current_active and current_active != target_active:
@@ -211,6 +220,11 @@ def main():
         return 1
     finally:
         stop_event.set()
+        if os.path.exists(CONFIG_PATH):
+            try:
+                os.remove(CONFIG_PATH)
+            except Exception:
+                pass
         if proxy.poll() is None:
             proxy.kill()
         mock_server.shutdown()
