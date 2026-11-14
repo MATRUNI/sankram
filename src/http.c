@@ -4,6 +4,8 @@
 
 #include "http.h"
 
+#define ASCII_LOWER(c) ((c) | 0x20)
+
 static int parseRequestLine(char *line, struct http_request *req)
 {
     if (line == NULL || req == NULL) return 1;
@@ -49,7 +51,7 @@ static char *trim(char *s)
     return start;
 }
 
-static int add_header(char *line, struct http_header *h)
+static int add_header(char *line, struct http_header *h, struct fast_headers *fast)
 {
     if (line == NULL || h == NULL) return 1;
     char *colon = strchr(line, ':');
@@ -58,6 +60,40 @@ static int add_header(char *line, struct http_header *h)
 
     h->name = line;
     h->value = trim(colon + 1);
+    size_t name_len = colon - line;
+    switch (ASCII_LOWER(line[0]))
+    {
+        case 'h':
+            if(name_len==4 && ASCII_LOWER(line[3]) == 't' && strcasecmp(line, "Host") == 0)
+                fast->host = h->value;
+            break;
+        case 'o':
+            if(name_len==6 && ASCII_LOWER(line[5]) == 'n'&& strcasecmp(line, "Origin") == 0)
+                fast->origin = h->value;
+            break;
+        case 'u':
+            if(name_len==7 && ASCII_LOWER(line[6]) == 'e' && strcasecmp(line, "Upgrade") == 0)
+                fast->upgrade = h->value;
+            break;
+        case 's':
+            if(name_len==17 && ASCII_LOWER(line[16]) == 'y' && strcasecmp(line, "Sec-Websocket-Key") == 0)
+                fast->sec_websocket_key = h->value;
+            break;
+        case 'c':
+            switch (name_len)
+            {
+                case 10:
+                    if (ASCII_LOWER(line[9]) == 'n' && strcasecmp(line, "Connection") == 0)
+                        fast->connection = h->value;
+                    break;
+                case 14:
+                    if (ASCII_LOWER(line[13]) == 'h' && strcasecmp(line, "Content-length") == 0)
+                        fast->content_length = h->value;
+                    break;
+            }
+        default:
+            break;
+    }
     return 0;
 }
 
@@ -70,6 +106,7 @@ static int parse_headers(char *buffer,struct http_headers *headers)
     headers->items = headers->inline_items;
     headers->capacity = HTTP_MAX_INLINE_HEADERS;
     headers->count = 0;
+    memset(&headers->fast, 0, sizeof(headers->fast));
     char *rest=strstr(buffer,"\r\n");
     while(rest!=NULL)
     {
@@ -91,7 +128,7 @@ static int parse_headers(char *buffer,struct http_headers *headers)
             headers->items = new_item;
             headers->capacity = new_capacity;
         }
-        if(add_header(buffer,&headers->items[headers->count])==1)
+        if(add_header(buffer,&headers->items[headers->count], &headers->fast)==1)
         {
             return 1;
         }
@@ -112,6 +149,7 @@ void free_headers(struct http_headers *headers)
     headers->items = NULL;
     headers->capacity = 0;
     headers->count = 0;
+    memset(&headers->fast, 0, sizeof(headers->fast));
 }
 
 void free_request(struct http_request *req)

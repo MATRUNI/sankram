@@ -76,8 +76,8 @@ log_level_t current_log_level = LOG_INFO;
 
 static const char *log_value[] = {
     "DEBUG",
-    "INFO",
-    "WARN",
+    "INFO ",
+    "WARN ",
     "ERROR"
 };
 
@@ -442,21 +442,22 @@ int get_logs()
 
         char *tag = NULL;
         const char *tag_color = COLOR_RESET;
-        int tag_len = 0;
+        int tag_len = 7;
 
         if ((tag = strstr(line, "[ERROR]")) != NULL) {
             tag_color = COLOR_RED;
-            tag_len = 7;
-        } else if ((tag = strstr(line, "[WARN]")) != NULL) {
+        } else if ((tag = strstr(line, "[WARN ]")) != NULL) {
             tag_color = COLOR_YELLOW;
-            tag_len = 6;
-        } else if ((tag = strstr(line, "[INFO]")) != NULL) {
+        } else if ((tag = strstr(line, "[INFO ]")) != NULL) {
             tag_color = COLOR_GREEN;
-            tag_len = 6;
         } else if ((tag = strstr(line, "[DEBUG]")) != NULL) {
             tag_color = COLOR_CYAN;
-            tag_len = 7;
         }
+        else
+        {
+            tag_len = 0;
+        }
+        
 
         if (tid_start != NULL && tid_end != NULL && tag != NULL) {
 

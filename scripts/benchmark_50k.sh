@@ -66,12 +66,13 @@ cleanup() {
     echo -e "\n${C_YELLOW}Cleaning up benchmark processes...${C_RESET}"
     if [ -n "$PROXY_PID" ]; then
         kill -SIGINT "$PROXY_PID" 2>/dev/null || true
-        wait "$PROXY_PID" 2>/dev/null || true
+        kill -9 "$PROXY_PID" 2>/dev/null || true
     fi
     if [ -n "$MOCK_PID" ]; then
-        kill -SIGTERM "$MOCK_PID" 2>/dev/null || true
         pkill -P "$MOCK_PID" 2>/dev/null || true
+        kill -9 "$MOCK_PID" 2>/dev/null || true
     fi
+    pkill -9 -f "$MOCK_SCRIPT" 2>/dev/null || true
     rm -f "$MOCK_SCRIPT"
     kill_port ${MOCK_PORT}
     kill_port ${PROXY_PORT}
@@ -102,7 +103,7 @@ if (cluster.isPrimary) {
 }
 EOF
 
-MOCK_PORT=$MOCK_PORT node "$MOCK_SCRIPT" &
+MOCK_PORT=$MOCK_PORT node "$MOCK_SCRIPT" >/dev/null 2>&1 &
 MOCK_PID=$!
 
 # 3. Start C Proxy Server (16 threads, silent log mode)
@@ -129,12 +130,17 @@ echo "${C_GREEN}✔ Both Proxy and Upstream are online and responsive.${C_RESET}
 sleep 0.5
 
 # 4. Multi-Phase Warm-up & Peak Benchmark
-echo ""
-echo "${C_CYAN}[Phase 1/3] Priming upstream V8 JIT & connection pools...${C_RESET}"
-./$BIN -m stress -u "http://127.0.0.1:${PROXY_PORT}/?url=http%3A%2F%2F127.0.0.1%3A${MOCK_PORT}%2F" -c ${CONCURRENCY} -n ${TOTAL_REQUESTS} -t ${STRESS_THREADS} >/dev/null 2>&1
+WARMUP_REQS=2000
+if [ "$WARMUP_REQS" -gt "$TOTAL_REQUESTS" ]; then
+    WARMUP_REQS="$TOTAL_REQUESTS"
+fi
 
-echo "${C_CYAN}[Phase 2/3] Warming Linux socket tables & kernel cache lines...${C_RESET}"
-./$BIN -m stress -u "http://127.0.0.1:${PROXY_PORT}/?url=http%3A%2F%2F127.0.0.1%3A${MOCK_PORT}%2F" -c ${CONCURRENCY} -n ${TOTAL_REQUESTS} -t ${STRESS_THREADS} >/dev/null 2>&1
+echo ""
+echo "${C_CYAN}[Phase 1/3] Priming upstream V8 JIT & connection pools (${WARMUP_REQS} reqs)...${C_RESET}"
+./$BIN -m stress -u "http://127.0.0.1:${PROXY_PORT}/?url=http%3A%2F%2F127.0.0.1%3A${MOCK_PORT}%2F" -c ${CONCURRENCY} -n ${WARMUP_REQS} -t ${STRESS_THREADS} >/dev/null 2>&1
+
+echo "${C_CYAN}[Phase 2/3] Warming Linux socket tables & kernel cache lines (${WARMUP_REQS} reqs)...${C_RESET}"
+./$BIN -m stress -u "http://127.0.0.1:${PROXY_PORT}/?url=http%3A%2F%2F127.0.0.1%3A${MOCK_PORT}%2F" -c ${CONCURRENCY} -n ${WARMUP_REQS} -t ${STRESS_THREADS} >/dev/null 2>&1
 
 echo ""
 echo "${C_BOLD}${C_GREEN}🚀 [Phase 3/3] Executing Peak 50,000+ Req/Sec Stress Benchmark...${C_RESET}"

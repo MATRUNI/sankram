@@ -46,7 +46,8 @@ typedef enum {
     LEVEL_UPSTREAM_CONNECT,    
     LEVEL_UPSTREAM_READ_RESP,  
 
-    LEVEL_CLIENT_WRITE_RESP,   
+    LEVEL_CLIENT_WRITE_RESP,
+    LEVEL_WEBSOCKET_TUNNEL,
     LEVEL_COMPLETE             
 } session_level_t;
 
@@ -66,6 +67,8 @@ struct client_session {
     char initial_buffer[4096];
     struct upstream_pool *pool;
     const struct origin_whitelist *whitelist;
+
+    bool is_websocket;
 };
 
 ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len);

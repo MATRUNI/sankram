@@ -186,12 +186,10 @@ build/obj_small/%.o: src/%.c $(HEADERS)
 run: $(TARGET)
 	@$(TARGET) -p 17777 -t 8
 
-# Run sanity check
+# Run unified test suite (Python 3 Stdlib)
 .PHONY: test
 test: $(TARGET)
-	@echo "Verifying Sankram binary..."
-	@$(TARGET) -h
-	@echo "✔ Sankram sanity check passed."
+	@python3 scripts/tests/run_all.py
 
 # Clean build artifacts
 .PHONY: clean
