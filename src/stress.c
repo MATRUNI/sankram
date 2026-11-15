@@ -86,6 +86,8 @@ int stress_conn_handle(struct stress_connection *s)
         else
         {
             s->worker->reqs_failed++;
+            if (s->con.upstream_fd >= 0)
+                s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
             conn_close(&s->con);
             if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
             {
@@ -95,7 +97,7 @@ int stress_conn_handle(struct stress_connection *s)
         }
 
     }
-    while(s->bytes_sent < s->worker->request_len)
+    while(s->state == CONN_SENDING && s->bytes_sent < s->worker->request_len)
     {
         int n = s->con.write(&s->con,(char *)s->worker->request_buf+s->bytes_sent,s->worker->request_len-s->bytes_sent);
         if(n==0) break;
@@ -107,8 +109,9 @@ int stress_conn_handle(struct stress_connection *s)
             }
             else
             {
-                perror("send");
                 s->worker->reqs_failed++;
+                if (s->con.upstream_fd >= 0)
+                    s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
                 conn_close(&s->con);
                 if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
                 {
@@ -135,6 +138,8 @@ int stress_conn_handle(struct stress_connection *s)
                 s->worker->engine->mod(s->worker->engine, s->con.upstream_fd, ENGINE_READ | ENGINE_ONESHOT, s);
             else
             {
+                if (s->con.upstream_fd >= 0)
+                    s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
                 conn_close(&s->con);
                 s->worker->reqs_failed++;
                 if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
@@ -146,6 +151,8 @@ int stress_conn_handle(struct stress_connection *s)
         {
             if(s->worker->reqs_completed < s->worker->reqs_target)
             {
+                if (s->con.upstream_fd >= 0)
+                    s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
                 conn_close(&s->con);
                 stress_engine_init(s);
                 return 0;
@@ -276,6 +283,9 @@ int run_stress_engine(struct proxy_config *config)
         workers[i].request_buf = req_buf;
         workers[i].request_len = req_len;
         workers[i].conns = calloc(workers[i].conn_count, sizeof(struct stress_connection));
+        for (int j = 0; j < workers[i].conn_count; j++) {
+            workers[i].conns[j].con.upstream_fd = -1;
+        }
         workers[i].url = url;
         workers[i].target_addr = target_addr;
         if(pthread_create(&workers[i].thread, NULL, stress_worker_thread,&workers[i])!=0)

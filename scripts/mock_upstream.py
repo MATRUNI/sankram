@@ -12,6 +12,8 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 PORT = int(os.environ.get("MOCK_PORT", 9099))
 
 class MockHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def handle(self):
         try:
             super().handle()

@@ -148,7 +148,7 @@ int send_all(int fd, const char *buffer, size_t total)
                 write_log(LOG_WARN, "Client disconnected prematurely (broken pipe).");
             }
             else {
-                perror("send");
+                write_log(LOG_WARN, "Client write failed (errno=%d)", err);
             }
             return 1;
         }

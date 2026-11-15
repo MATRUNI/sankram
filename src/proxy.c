@@ -72,7 +72,7 @@ int conn_write_all(struct proxy_connection *conn, const void *buf, size_t total)
             else if (err == EPIPE_COMPAT || err == ECONNRESET_COMPAT)
                 write_log(LOG_WARN, "Upstream server closed connection unexpectedly.");
             else
-                perror("send");
+                write_log(LOG_WARN, "Upstream server write failed (errno=%d)", err);
             return 1;
         }
         sent += n;
