@@ -5,6 +5,7 @@
 #include "http.h"
 #include "url.h"
 #include "poll_engine.h"
+#include "dns_cache.h"
 
 #define PROXY_DONE   0   // Request completed successfully
 #define PROXY_ERROR  1   // Error occurred or client disconnected
@@ -12,6 +13,19 @@
 
 #define UPSTREAM_POOL_MAX 64
 #define UPSTREAM_IDLE_TIMEOUT_MS 10000  // 10 seconds
+#define CLIENT_HEADER_TIMEOUT_MS 10000 // 10 seconds total header deadline
+#define TUNNEL_BUF_SIZE 8192
+
+struct tunnel_buf {
+    char data[TUNNEL_BUF_SIZE];
+    size_t len;
+    size_t pos;
+};
+struct tunnel_ctx {
+    struct tunnel_buf to_client;
+    struct tunnel_buf to_upstream;
+};
+
 struct proxy_connection
 {
     int client_fd;
@@ -21,6 +35,8 @@ struct proxy_connection
     size_t body_bytes_sent;
     ssize_t (*read)(struct proxy_connection *conn, void *buf, size_t len);
     ssize_t (*write)(struct proxy_connection *conn, void *buf, size_t len);
+
+    bool is_pooled;
 };
 
 struct upstream_pool_entry {
@@ -69,6 +85,10 @@ struct client_session {
     const struct origin_whitelist *whitelist;
 
     bool is_websocket;
+    struct tunnel_ctx *tunnel;
+
+    uint64_t header_start_ms;
+    struct dns_cache *dns_cache;
 };
 
 ssize_t plain_read_wrapper(struct proxy_connection *conn, void *buf, size_t len);

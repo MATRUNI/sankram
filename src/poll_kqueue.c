@@ -22,14 +22,18 @@ static inline int translate_from_kqueue(int16_t filter, uint16_t flags)
 
 static int kqueue_engine_add(struct poll_engine *engine, int target, int flags, void *user_data)
 {
-    struct kevent kev;
-    int filter = (flags & ENGINE_READ) ? EVFILT_READ : EVFILT_WRITE;
+    struct kevent kevs[2];
+    int n = 0;
     uint16_t kq_flags = EV_ADD | EV_ENABLE | EV_CLEAR;
-    if (flags & ENGINE_ONESHOT) {
-        kq_flags |= EV_ONESHOT;
+    if (flags & ENGINE_ONESHOT) kq_flags |= EV_ONESHOT;
+
+    if (flags & ENGINE_READ) {
+        EV_SET(&kevs[n++], target, EVFILT_READ, kq_flags, 0, 0, user_data);
     }
-    EV_SET(&kev,target,filter, kq_flags, 0,0, user_data);
-    return kevent(engine->fd,&kev,1,NULL, 0, NULL);
+    if (flags & ENGINE_WRITE) {
+        EV_SET(&kevs[n++], target, EVFILT_WRITE, kq_flags, 0, 0, user_data);
+    }
+    return (n > 0) ? kevent(engine->fd, kevs, n, NULL, 0, NULL) : 0;
 }
 
 static int kqueue_engine_del(struct poll_engine *engine, int target)

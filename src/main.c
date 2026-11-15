@@ -12,6 +12,9 @@
 #include "poll_engine.h"
 #include "net_compat.h"
 #include "thread_compat.h"
+#include "dns_cache.h"
+
+#define MAX_EVENTS 64
 
 static volatile sig_atomic_t server_running = 1;
 static pthread_attr_t attr;
@@ -21,10 +24,9 @@ struct worker_context {
     int listen_fd;
     pthread_t thread;
     struct upstream_pool pool;
+    struct dns_cache dns_cache;
     const struct origin_whitelist *whitelist;
 };
-
-#define MAX_EVENTS 64
 
 static void handle_sigint(int sig)
 {
@@ -75,6 +77,7 @@ static void *proxy_thread_worker(void *arg)
                         continue;
                     }
                     ses->pool = &self->pool;
+                    ses->dns_cache = &self->dns_cache;
                     ses->whitelist = self->whitelist;
                     self->engine->add(self->engine,client_fd,ENGINE_READ | ENGINE_ONESHOT,ses);
                 }
@@ -132,6 +135,7 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
                 write_log(LOG_ERROR, "Failed to create poll engine for worker %d", i);
                 return 1;
             }
+            dns_cache_init(&workers[i].dns_cache);
             struct proxy_server srv = {0};
             if(server_init(&srv, port, ip,timeout) != 0)
             {
@@ -162,6 +166,7 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
             workers[i].engine = poll_engine_create();
             if (workers[i].engine == NULL) return 1;
             
+            dns_cache_init(&workers[i].dns_cache);
             workers[i].listen_fd = srv.listen_fd; // Share the single listener
             workers[i].engine->add(workers[i].engine, workers[i].listen_fd, ENGINE_READ, NULL);
             if (pthread_create(&workers[i].thread, &attr, proxy_thread_worker, &workers[i]) != 0)

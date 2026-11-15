@@ -38,7 +38,7 @@ static int connectToDNS(struct addrinfo *adr,bool *in_progress)
     return -1;
 }
 
-int make_api_call(const char *host, const char *port, bool *in_progress)
+int make_api_call(struct dns_cache * cache,const char *host, const char *port, bool *in_progress)
 {
     if(host==NULL || port==NULL) return -1;
     struct sockaddr_in sin = {0};
@@ -73,16 +73,38 @@ int make_api_call(const char *host, const char *port, bool *in_progress)
     hints.ai_socktype=SOCK_STREAM;
     hints.ai_protocol=IPPROTO_TCP;
 
+    struct sockaddr_in cached_sin = {0};
+    if (cache != NULL && dns_cache_lookup(cache, host, port, &cached_sin))
+    {
+        // Cache HIT! We already know the IP address!
+        // Connect to cached_sin directly without calling getaddrinfo():
+        int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd != -1)
+        {
+            set_socket_non_blocking(server_fd);
+            set_socket_nodelay(server_fd);
+            int res = connect(server_fd, (struct sockaddr *)&cached_sin, sizeof(cached_sin));
+            if (res == 0) {
+                *in_progress = false;
+                return server_fd;
+            }
+            if (res == -1 && socket_errno == EINPROGRESS_COMPAT) {
+                *in_progress = true;
+                return server_fd;
+            }
+            close_socket(server_fd);
+        }
+    }
+
     int status=getaddrinfo(host,port,&hints,&adr);
     if(status!=0) return -1;
 
-    int server_fd=connectToDNS(adr,in_progress);
-    if(server_fd==-1)
+    if (cache != NULL && adr != NULL && adr->ai_family == AF_INET)
     {
-        freeaddrinfo(adr);
-        return -1;
+        dns_cache_insert(cache, host, port, (struct sockaddr_in *)adr->ai_addr, DNS_DEFAULT_TTL_MS);
     }
 
+    int server_fd=connectToDNS(adr,in_progress);
     freeaddrinfo(adr);
     return server_fd;
 }
@@ -126,6 +148,17 @@ static int stream_remaining(struct proxy_connection *con, bool to_client, char *
     return 0;
 }
 
+static char *find_chunk_end(const char *buf, size_t len)
+{
+    if (len < 5) return NULL;
+    for (size_t i = 0; i <= len - 5; i++)
+    {
+        if (buf[i] == '0' && buf[i+1] == '\r' && buf[i+2] == '\n' && buf[i+3] == '\r' && buf[i+4] == '\n')
+            return (char *)(buf + i);
+    }
+    return NULL;
+}
+
 int stream_body(struct proxy_connection *con,bool to_client,char *buffer,size_t capacity, size_t total,char *headers_end,long content)
 {
     if(content<=0 || buffer==NULL || headers_end==NULL) return 1;
@@ -143,6 +176,39 @@ int stream_body(struct proxy_connection *con,bool to_client,char *buffer,size_t 
     long remaining_bytes = content - initial_body_bytes;
     
     return (remaining_bytes > 0) ? stream_remaining(con, to_client, buffer, capacity, remaining_bytes) : 0;
+}
+
+int stream_chunked_body(struct proxy_connection *con, char *buffer, size_t capacity, size_t total, char *headers_end, size_t *chunked_consumed)
+{
+    char *body_start = headers_end + 4;
+    size_t initial_bytes = (total > (size_t)(body_start - buffer)) ? (total - (size_t)(body_start - buffer)) : 0;
+    char *tail = find_chunk_end(body_start,initial_bytes);
+    if(tail!=NULL)
+    {
+        char *term = find_chunk_end(body_start, initial_bytes);
+        conn_write_all(con, body_start, (size_t)(term + 5 - body_start));
+        *chunked_consumed = (size_t)(term + 5 - buffer);
+        return 0;
+    }
+    else
+    {
+        if(initial_bytes>0)
+            conn_write_all(con,body_start,initial_bytes);
+        while(1)
+        {
+            int n = recv(con->client_fd,buffer,capacity,0);
+            if(n<=0) return 1;
+
+            if(conn_write_all(con, buffer,(size_t)n)!=0) return 1;
+
+            if(find_chunk_end(buffer,(size_t)n)!=NULL)
+            {
+                *chunked_consumed = 0;
+                return 0;
+            }
+        }
+        return 1;
+    }
 }
 
 int sendHTTPRequest(struct proxy_connection *con, struct http_request *req, struct http_url *url)

@@ -47,6 +47,11 @@ SUITES = [
         "name": "Fallback & Overflow Circuit-Breaker Resilience",
         "script": "scripts/tests/test_fallback.py",
     },
+    {
+        "id": "resilience",
+        "name": "Stale Upstream Auto-Retry & HTTP Pipelining",
+        "script": "scripts/tests/test_resilience.py",
+    },
 ]
 
 def main():

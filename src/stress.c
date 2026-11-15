@@ -87,6 +87,10 @@ int stress_conn_handle(struct stress_connection *s)
         {
             s->worker->reqs_failed++;
             conn_close(&s->con);
+            if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
+            {
+                stress_engine_init(s);
+            }
             return 1;
         }
 
@@ -104,7 +108,12 @@ int stress_conn_handle(struct stress_connection *s)
             else
             {
                 perror("send");
+                s->worker->reqs_failed++;
                 conn_close(&s->con);
+                if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
+                {
+                    stress_engine_init(s);
+                }
             }
             return 1;
         }
@@ -124,6 +133,13 @@ int stress_conn_handle(struct stress_connection *s)
         {
             if(socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT)
                 s->worker->engine->mod(s->worker->engine, s->con.upstream_fd, ENGINE_READ | ENGINE_ONESHOT, s);
+            else
+            {
+                conn_close(&s->con);
+                s->worker->reqs_failed++;
+                if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
+                    stress_engine_init(s);
+            }
             return 1;
         }
         if(n==0)

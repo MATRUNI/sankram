@@ -41,7 +41,15 @@ int server_init(struct proxy_server *server, int port,const char *ip, int timeou
         close_socket(fd);
         return 1;
     }
-    if(listen(fd,SOMAXCONN)==-1)
+    
+    #if defined(_WIN32)
+        int backlog = 512;
+    #elif defined(SOMAXCONN)
+        int backlog = SOMAXCONN;
+    #else
+        int backlog = 512;
+    #endif
+    if (listen(fd, backlog) == -1)
     {
         perror("listen");
         close_socket(fd);

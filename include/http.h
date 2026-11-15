@@ -16,6 +16,7 @@ struct fast_headers {
     const char *origin;
     const char *content_length;
     const char *sec_websocket_key;
+    const char *transfer_encoding;
 };
 
 struct http_headers

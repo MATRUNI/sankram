@@ -79,6 +79,10 @@ static int add_header(char *line, struct http_header *h, struct fast_headers *fa
             if(name_len==17 && ASCII_LOWER(line[16]) == 'y' && strcasecmp(line, "Sec-Websocket-Key") == 0)
                 fast->sec_websocket_key = h->value;
             break;
+        case 't':
+            if(name_len==17 && ASCII_LOWER(line[16]) == 'g' && strcasecmp(line, "Transfer-encoding")==0)
+                fast->transfer_encoding = h->value;
+            break;
         case 'c':
             switch (name_len)
             {

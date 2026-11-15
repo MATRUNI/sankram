@@ -48,6 +48,7 @@ static bool match_wildcard(const char *pattern, const char *str)
     while (*pattern == '*') pattern++;
     return *pattern == '\0';
 }
+
 ssize_t plain_write_wrapper(struct proxy_connection *conn, void *buf, size_t len)
 {
     return send(conn->upstream_fd,buf,len,0);
@@ -157,6 +158,8 @@ struct client_session *session_create(int client_fd,struct poll_engine *engine)
     session->total = 0;
     session->offset = 0;
     session->buffer = session->initial_buffer;
+    session->tunnel = NULL;
+    session->header_start_ms = 0;
     session->url= (struct http_url){0};
     session->req = (struct http_request){0};
     session->buffer[0]='\0';
@@ -169,7 +172,7 @@ struct client_session *session_create(int client_fd,struct poll_engine *engine)
     return session;
 }
 
-static void session_reset(struct client_session *session)
+static void session_reset(struct client_session *session, size_t consumed)
 {
     if (session == NULL) return;
     int client_fd = session->con.client_fd;
@@ -184,16 +187,32 @@ static void session_reset(struct client_session *session)
 
     session->level = LEVEL_CLIENT_READ_HEADERS;
     session->is_websocket = false;
-    session->total = 0;
+    session->header_start_ms = 0;
     session->offset = 0;
-    if (session->buffer != session->initial_buffer)
+    if(session->tunnel!=NULL)
     {
-        free(session->buffer);
-        session->buffer = session->initial_buffer;
-        session->capacity = sizeof(session->initial_buffer);
+        free(session->tunnel);
+        session->tunnel =NULL;
     }
-    session->buffer[0] = '\0';
-
+    if(session->total > consumed)
+    {
+        size_t remaining = session->total - consumed;
+        memmove(session->buffer,session->buffer+consumed,remaining);
+        session->total = remaining;
+        session->buffer[remaining]='\0';
+    }
+    else
+    {
+        session->total = 0;
+        if (session->buffer != session->initial_buffer)
+        {
+            free(session->buffer);
+            session->buffer = session->initial_buffer;
+            session->capacity = sizeof(session->initial_buffer);
+        }
+        session->buffer[0] = '\0';
+    
+    }
     session->engine->mod(session->engine,client_fd,ENGINE_READ | ENGINE_ONESHOT,session);
 }
 
@@ -211,6 +230,7 @@ void session_free(struct client_session *session)
             session->engine->del(session->engine, session->con.upstream_fd);
         }
     }
+    if(session->tunnel!=NULL) free(session->tunnel);
     if (session->buffer != NULL && session->buffer != session->initial_buffer)
     {
         free(session->buffer);
@@ -279,6 +299,142 @@ static void send_client_error(int client_fd, int status_code, const char *messag
     }
 }
 
+static int handle_websocket_tunnel(struct client_session *session)
+{
+    char ws_buf[8192];
+    int c_fd = session->con.client_fd;
+    if(session->tunnel==NULL)
+        session->tunnel = calloc(1, sizeof(struct tunnel_ctx));
+    if(session->tunnel==NULL) goto cleanup_tunnel;
+    struct tunnel_ctx *t = session->tunnel;
+
+    while(t->to_client.pos<t->to_client.len)
+    {
+        int n = send(session->con.client_fd,t->to_client.data + t->to_client.pos,t->to_client.len-t->to_client.pos,0);
+        if(n==-1)
+        {
+            if(socket_errno != EAGAIN_COMPAT && socket_errno != EWOULDBLOCK_COMPAT)
+            {
+                goto cleanup_tunnel;
+            }
+            break;
+        }
+        if(n>0)
+        t->to_client.pos+=n;
+        if(t->to_client.pos>=t->to_client.len)
+        {
+            t->to_client.len = 0;
+            t->to_client.pos = 0;
+        }
+    }
+
+    while(t->to_upstream.pos<t->to_upstream.len)
+    {
+        int n = session->con.write(&session->con,t->to_upstream.data + t->to_upstream.pos,t->to_upstream.len-t->to_upstream.pos);
+        if(n==-1)
+        {
+            if(socket_errno != EAGAIN_COMPAT && socket_errno != EWOULDBLOCK_COMPAT)
+            {
+                goto cleanup_tunnel;
+            }
+            break;
+        }
+        if(n>0)
+            t->to_upstream.pos+=n;
+        if(t->to_upstream.pos>=t->to_upstream.len)
+        {
+            t->to_upstream.len = 0;
+            t->to_upstream.pos = 0;
+        }
+    }
+
+    if (t->to_upstream.len == 0)
+    {
+        while(1)
+        {
+            ssize_t n = recv(c_fd, ws_buf, sizeof(ws_buf), 0);
+            if (n == 0) {
+                goto cleanup_tunnel;
+            }
+            if (n < 0) {
+                if (socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT) {
+                    break;
+                }
+                goto cleanup_tunnel;
+            }
+            ssize_t sent = session->con.write(&session->con, ws_buf, (size_t)n);
+            if(sent<0)
+            {
+                if(socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT)
+                    sent = 0;
+                else
+                    goto cleanup_tunnel;
+            }
+            if(sent<n)
+            {
+                memcpy(t->to_upstream.data,ws_buf+sent,(size_t)n-sent);
+                t->to_upstream.len = n- sent;
+                t->to_upstream.pos = 0;
+                break;
+            }
+        }
+    }
+
+    if(t->to_client.len == 0)
+    {
+        while (1)
+        {
+            ssize_t n = session->con.read(&session->con, ws_buf, sizeof(ws_buf));
+            if (n == 0) {
+                goto cleanup_tunnel;
+            }
+            if (n < 0) {
+                if (socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT) {
+                    break;
+                }
+                goto cleanup_tunnel;
+            }
+            ssize_t sent = send(c_fd, ws_buf, (size_t)n, 0);
+
+            if (sent<0)
+            {
+                if (socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT) sent = 0;
+                else
+                    goto cleanup_tunnel;
+            }
+            if(sent < n)
+            {
+                memcpy(t->to_client.data,ws_buf+sent, (size_t)n-sent);
+                t->to_client.len = n - sent;
+                t->to_client.pos = 0;
+                break;
+            }
+        }
+    }
+    int c_flags = ENGINE_ONESHOT;
+    if (t->to_client.len > 0)
+        c_flags |= ENGINE_WRITE; // Client buffer full, wait for it to drain
+    else if (t->to_upstream.len == 0)
+        c_flags |= ENGINE_READ;  // Can read more from client
+
+    int u_flags = ENGINE_ONESHOT;
+    if (t->to_upstream.len > 0)
+        u_flags |= ENGINE_WRITE; // Upstream buffer full, wait for it to drain
+    else if (t->to_client.len == 0)
+        u_flags |= ENGINE_READ;  // Can read more from upstream
+
+    session->engine->mod(session->engine, c_fd, c_flags, session);
+    session->engine->mod(session->engine, session->con.upstream_fd, u_flags, session);
+
+    return PROXY_AGAIN;
+    cleanup_tunnel:
+    write_log(LOG_DEBUG, "WebSocket tunnel closed for client (fd=%d)", session->con.client_fd);
+    conn_close(&session->con);
+    free(session->tunnel);
+    session->tunnel = NULL;
+    return PROXY_DONE;
+}
+
 int proxy_handle_client(struct client_session *session)
 {
     int res = PROXY_ERROR;
@@ -297,7 +453,7 @@ int proxy_handle_client(struct client_session *session)
         case LEVEL_UPSTREAM_CONNECT:
             goto LEVEL_UPSTREAM_CONNECT;
         case LEVEL_WEBSOCKET_TUNNEL:
-            goto LEVEL_WEBSOCKET_TUNNEL;
+            return handle_websocket_tunnel(session);
         default:
             break;
     }
@@ -332,11 +488,25 @@ int proxy_handle_client(struct client_session *session)
         int n = recv(client_fd,buffer+total,capacity-total-1,0);
         if (n == -1)
         {
-            if (socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT) {
+            if (socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT)
+            {
+                if(session->header_start_ms == 0)
+                    session->header_start_ms = get_time_ms();
+                else
+                {
+                    uint64_t elapsed_ms = get_time_ms() - session->header_start_ms;
+                    if(elapsed_ms>= CLIENT_HEADER_TIMEOUT_MS)
+                    {
+                        write_log(LOG_WARN, "Slowloris header deadline exceeded (%llu ms) on client_fd=%d",(unsigned long long)elapsed_ms, client_fd);
+                        send_client_error(client_fd, 408, "408 Request Timeout: Header read deadline exceeded\n");
+                        return res;
+                    }
+                }
                 write_log(LOG_WARN, "Waiting for more data from client.");
                 session->total = total;
                 session->capacity = capacity;
                 session->buffer = buffer;
+                session->engine->mod(session->engine, client_fd, ENGINE_READ | ENGINE_ONESHOT, session);
                 return PROXY_AGAIN;
             }
             return res;
@@ -457,6 +627,7 @@ int proxy_handle_client(struct client_session *session)
     bool in_progress = false;
     if(session->con.upstream_fd >= 0 && strcmp(session->upstream_host,session->url.host)==0 && strcmp(session->upstream_port,session->url.port)==0)
     {
+        session->con.is_pooled = true;
         goto MAKE_CALL;
     }
 
@@ -468,10 +639,14 @@ int proxy_handle_client(struct client_session *session)
             strncpy(session->upstream_host, session->url.host, sizeof(session->upstream_host) - 1);
             strncpy(session->upstream_port, session->url.port, sizeof(session->upstream_port) - 1);
             session->upstream_is_https = (strcasecmp(session->url.schema, "https") == 0);
+            session->con.is_pooled = true;
             goto MAKE_CALL; // Jump straight to sending! Zero DNS, Zero TCP handshake!
         }
     }
-    int server_fd = make_api_call(session->url.host,session->url.port, &in_progress);
+    DIAL_FRESH_UPSTREAM:
+    session->con.is_pooled = false;
+    in_progress = false;
+    int server_fd = make_api_call(session->dns_cache,session->url.host,session->url.port, &in_progress);
     if(server_fd==-1)
     {
         send_client_error(client_fd, 502, "Failed to connect to target server (DNS or connection refused)\n");
@@ -520,14 +695,41 @@ int proxy_handle_client(struct client_session *session)
     MAKE_CALL:
     if(sendHTTPRequest(&session->con,&session->req,&session->url)==1)
     {
+        if(session->con.is_pooled)
+        {
+            write_log(LOG_DEBUG,"Pooled upstream connection stale, retrying on fresh socket for %s:%s",session->url.host,session->url.port);
+            conn_close(&session->con);
+            session->con.upstream_fd = -1;
+            session->con.upstream_ssl = NULL;
+            session->con.is_pooled = false;
+            session->upstream_host[0] = '\0';
+            session->upstream_port[0] = '\0';
+            goto DIAL_FRESH_UPSTREAM;
+        }
         send_client_error(client_fd, 502, "Failed to send request headers to target server\n");
         goto cleanup_con;
     }
 
     const char *len_str = session->req.headers.fast.content_length;
-    if (len_str != NULL)
+    const char *te_str = session->req.headers.fast.transfer_encoding;
+    bool is_chunked = (te_str != NULL && strcasestr(te_str, "chunked") != NULL);
+    long content_length = 0;
+    size_t chunked_consumed = 0;
+    if(is_chunked)
     {
-        long content_length = strtol(len_str, NULL, 10);
+        set_socket_blocking(client_fd);
+        set_socket_timeout(client_fd);
+        int err = stream_chunked_body(&session->con, buffer, capacity, total, headers_end, &chunked_consumed);
+        set_socket_non_blocking(client_fd);
+        if(err==1)
+        {
+            send_client_error(client_fd,502,"Failed to stream chunked request body to target server\n");
+            goto cleanup_con;
+        }
+    }
+    else if (len_str != NULL)
+    {
+        content_length = strtol(len_str, NULL, 10);
         if(content_length>0)
         {
             set_socket_blocking(session->con.client_fd);
@@ -567,17 +769,30 @@ int proxy_handle_client(struct client_session *session)
     {
         write_log(LOG_INFO, "Upgraded connection to WebSocket tunnel for %s", session->url.host);
         session->level = LEVEL_WEBSOCKET_TUNNEL;
+        if(session->tunnel==NULL)
+            session->tunnel = calloc(1, sizeof(struct tunnel_ctx));
         write_log(LOG_DEBUG, "Active WebSocket tunnel bridged: client (fd=%d) <--> upstream (fd=%d)", session->con.client_fd, session->con.upstream_fd);
         set_socket_non_blocking(session->con.client_fd);
         set_socket_non_blocking(session->con.upstream_fd);
         session->engine->add(session->engine, session->con.upstream_fd, ENGINE_READ | ENGINE_ONESHOT, session);
         session->engine->mod(session->engine, session->con.client_fd, ENGINE_READ | ENGINE_ONESHOT, session);
-        return PROXY_AGAIN;
+        return handle_websocket_tunnel(session);
     }
     set_socket_non_blocking(session->con.client_fd);
 
     if (res_err == 1)
     {
+        if(session->con.is_pooled && (len_str == NULL || content_length == 0) && (session->con.body_bytes_sent == 0))
+        {
+            write_log(LOG_DEBUG, "Pooled upstream socket dropped response, retrying on fresh socket for %s:%s", session->url.host, session->url.port);
+            conn_close(&session->con);
+            session->con.upstream_fd = -1;
+            session->con.upstream_ssl = NULL;
+            session->con.is_pooled = false;
+            session->upstream_host[0] = '\0';
+            session->upstream_port[0] = '\0';
+            goto DIAL_FRESH_UPSTREAM;
+        }
         send_client_error(client_fd, 502, "Target server closed connection without valid HTTP response\n");
         goto cleanup_con;
     }
@@ -588,67 +803,34 @@ int proxy_handle_client(struct client_session *session)
                   session->req.method, session->url.host, session->con.status_code,
                   (unsigned long)session->con.body_bytes_sent, (unsigned long long)latency_ms);
     }
-
+    size_t consumed = session->offset + 4;
+    if(is_chunked)
+    {
+        consumed = (chunked_consumed > 0) ? chunked_consumed : session->total;
+    }
+    else if (content_length > 0)
+    {
+        consumed += (size_t)content_length;
+        if (consumed > session->total)
+            consumed = session->total;
+    }
     if (keep_alive)
     {
-        session_reset(session);
-        write_log(LOG_DEBUG, "Session reset for keep-alive reuse (client_fd=%d)", client_fd);
+        session_reset(session,consumed);
+        write_log(LOG_DEBUG, "Session reset for keep-alive reuse (client_fd=%d, remaining=%zu)", client_fd, session->total);
+        if (session->total > 0)
+        {
+            buffer = session->buffer;
+            total = session->total;
+            capacity = session->capacity;
+            headers_end = strstr(buffer, "\r\n\r\n");
+            goto LEVEL_CLIENT_READ_HEADERS;
+        }
         return PROXY_AGAIN;
     }
     res = PROXY_DONE;
     goto cleanup_url;
-
-    LEVEL_WEBSOCKET_TUNNEL:
-    {
-        char ws_buf[8192];
-        int c_fd = session->con.client_fd;
-
-        while (1)
-        {
-            ssize_t n = recv(c_fd, ws_buf, sizeof(ws_buf), 0);
-            if (n > 0)
-            {
-                if (conn_write_all(&session->con, ws_buf, (size_t)n) != 0)
-                    goto cleanup_tunnel;
-            }
-            else if (n == 0)
-                goto cleanup_tunnel;
-            else
-            {
-                int err = socket_errno;
-                if (err != EAGAIN_COMPAT && err != EWOULDBLOCK_COMPAT)
-                    goto cleanup_tunnel;
-                break;
-            }
-        }
-
-        while (1)
-        {
-            ssize_t n = session->con.read(&session->con, ws_buf, sizeof(ws_buf));
-            if (n > 0)
-            {
-                if (send_all(c_fd, ws_buf, (size_t)n) != 0)
-                    goto cleanup_tunnel;
-            }
-            else if (n == 0)
-                goto cleanup_tunnel;
-            else
-            {
-                int err = socket_errno;
-                if (err != EAGAIN_COMPAT && err != EWOULDBLOCK_COMPAT)
-                    goto cleanup_tunnel;
-                break;
-            }
-        }
-        session->engine->mod(session->engine, c_fd, ENGINE_READ | ENGINE_ONESHOT, session);
-        session->engine->mod(session->engine, session->con.upstream_fd, ENGINE_READ | ENGINE_ONESHOT, session);
-        return PROXY_AGAIN;
-
-    cleanup_tunnel:
-        write_log(LOG_DEBUG, "WebSocket tunnel closed for client (fd=%d)", session->con.client_fd);
-        conn_close(&session->con);
-        return PROXY_DONE;
-    }
+    
     cleanup_con:
     conn_close(&session->con);
     cleanup_url:

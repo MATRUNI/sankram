@@ -40,7 +40,7 @@ SMALL_TARGET = build/sankram_small$(EXE_EXT)
 # Common core source files across all platforms
 COMMON_SRCS = src/config.c src/http.c src/http_error.c src/logger.c \
               src/main.c src/proxy.c src/server.c src/stress.c \
-              src/upstream.c src/url.c
+              src/upstream.c src/url.c src/dns_cache.c
 
 # OS-native I/O multiplexer and SSL/TLS engine selection
 ifeq ($(PLATFORM),Windows)

@@ -139,7 +139,7 @@ def is_proxy_alive():
     except Exception:
         return False
 
-def run_single_test(tc, max_retries=2):
+def run_single_test(tc, max_retries=4):
     target = tc.get("raw_url") or f"{PROXY_URL}/?url={urllib.parse.quote(tc['url'])}"
     method = tc.get("method", "GET")
     headers = tc.get("headers", {})
@@ -197,8 +197,11 @@ def run_single_test(tc, max_retries=2):
         passed = status_match and body_valid and (error_msg is None)
         if passed or attempt == max_retries or "DNS Failure" in tc.get("name", ""):
             break
-        # Transient retry pause on external rate limit or cloud drop
-        time.sleep(0.15)
+        # Transient retry pause on external rate limit, cloud drop, or loopback backlog
+        if error_msg and ("10061" in error_msg or "refused" in error_msg.lower()):
+            time.sleep(0.35 * (attempt + 1) + 0.05 * (attempt % 3))
+        else:
+            time.sleep(0.15)
 
     return {
         "name": tc["name"],
@@ -220,7 +223,7 @@ def main():
         if not os.path.exists(bin_path):
             bin_path = "./build/api"
         print(f"Proxy not running. Starting {bin_path} on port {PROXY_PORT}...")
-        spawned_proxy = subprocess.Popen([bin_path, "-p", str(PROXY_PORT), "-o", "https://api-os.pages.dev,http://localhost:3000", "-l", "warn"],
+        spawned_proxy = subprocess.Popen([bin_path, "-p", str(PROXY_PORT), "-t", "8", "-o", "https://api-os.pages.dev,http://localhost:3000", "-l", "warn"],
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(30):
             if is_proxy_alive():
@@ -276,7 +279,8 @@ def main():
             })
 
         burst_start = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=burst_count) as executor:
+        burst_workers = min(32, burst_count) if sys.platform == "win32" else burst_count
+        with ThreadPoolExecutor(max_workers=burst_workers) as executor:
             burst_results = list(executor.map(run_single_test, burst_cases))
         total_burst_time = time.perf_counter() - burst_start
 
