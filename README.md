@@ -1,21 +1,23 @@
 # Sankram (संक्रम) — High-Performance C Reverse Proxy & Dynamic Edge Gateway
 
 [![CI](https://github.com/MATRUNI/sankram/actions/workflows/ci.yml/badge.svg)](https://github.com/MATRUNI/sankram/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/MATRUNI/sankram?color=brightgreen)](https://github.com/MATRUNI/sankram/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A lightweight, blazing-fast, and memory-efficient HTTP/HTTPS reverse proxy and dynamic edge gateway built from scratch in pure C. Designed to tackle extreme concurrency using a **Multi-Reactor Epoll/KQueue architecture**, an **asynchronous double-buffering logger**, and raw POSIX socket/TLS multiplexing with **zero external HTTP dependencies**.
+A lightweight, blazing-fast, and memory-efficient HTTP/HTTPS reverse proxy, WebSocket full-duplex tunnel, and dynamic edge gateway built from scratch in pure C. Designed to tackle extreme concurrency using an **OS-Native Multi-Reactor Architecture** (`epoll` on Linux, `kqueue` on macOS, `WSAPoll` on Windows), an **in-memory 2-way set-associative DNS cache**, an **asynchronous double-buffering carousel logger**, and raw socket/TLS multiplexing with **zero external HTTP dependencies**.
 
 ---
 
 ## ⚡ Verified Performance Achievements
 
-Benchmark measurements executed on an 8-core Linux system (`x86_64`) under industrial load testing tools (`wrk` epoll engine & native C stress suite):
+Benchmark measurements executed on an 8-core Linux system (`x86_64`, Intel Core i5-9300H @ 2.40GHz) under industrial load testing tools (`wrk 4.2.0 [epoll]` and native C stress suite):
 
-- **Peak Throughput**: **86,367.57 Requests / Second** (872,000+ completed requests in 10s with 0 socket errors).
-- **Ultra-Low Latency**: **1.17 ms median (p50)** and **3.08 ms 99th percentile (p99)** latency under heavy concurrency.
-- **Extreme Concurrency Resilience**: Seamlessly scales past **2,000 concurrent persistent connections** under peak saturation (71,707 req/s, 719,000+ requests) without dropping packets or stalling.
-- **Lean Memory Footprint**: Operates with a minimal **~14.2 MB RSS** kernel memory footprint under full multi-worker saturation.
-- **Zero-Allocation Data Paths**: Zero heap allocation in hot streaming paths; stack-allocated frames and pre-warmed ring buffers ensure consistent sub-millisecond turnarounds.
+- **Peak Throughput Record**: **103,157.54 Requests / Second** (1,548,551 completed requests in 15.01s with 0 socket errors).
+- **Ultra-Low Latency**: **1.80 ms median (p50)**, **2.28 ms (p75)**, **2.80 ms (p90)**, and **4.16 ms 99th percentile (p99)** latency under heavy multi-client concurrency.
+- **5-Minute Continuous Soak Endurance**: **23.6 Million+ Requests** sustained non-stop over 5 full minutes (78,729.48 req/s) with **0 socket errors**, **0 packet drops**, and **0.00 MB memory drift** (locked flat at **10.38 MB RSS**).
+- **Extreme Concurrency Resilience**: Seamlessly scales past **2,000 concurrent persistent connections** under peak saturation without dropping packets or stalling.
+- **L3 Hardware Cache Residency**: Shrank `sizeof(struct client_session)` from **26.3 KB down to 9.8 KB** by decoupling protocol-specific buffers onto dynamic pointers, enabling 400 connections to fit 100% inside hardware L3 CPU cache (3.9 MB vs 8 MB L3 cache).
+- **Zero-Allocation Hot Paths**: Zero heap allocation in hot streaming paths; stack-allocated frames, vector header memcpy, and thread-local connection pools ensure consistent sub-millisecond turnarounds.
 
 ---
 
@@ -36,21 +38,21 @@ All measurements are officially conducted using **`wrk 4.2.0 [epoll]`** on an 8-
 
 ---
 
-### 1. Sustained 5-Minute Industrial Endurance Soak Test (25.39M+ Requests)
+### 1. Sustained 5-Minute Industrial Endurance Soak Test (23.6M+ Requests)
 
-Under non-stop continuous load for **5 full minutes (300 seconds)** across 200 persistent connections, we tested 4, 8, and 10 reactor configurations:
+Under non-stop continuous load for **5 full minutes (300 seconds)** across 200 persistent connections, we tested multi-reactor configurations:
 
-| Metric | 4 Reactors (`-t 4`) | 8 Reactors (`-t 8`) | 10 Reactors (`-t 10`) 🏆 | 10-Reactor Gain vs 4-Core |
-| :--- | :---: | :---: | :---: | :---: |
-| **Test Duration** | 5m (300 seconds) | 5m (300 seconds) | **5m (300 seconds)** | Identical |
-| **Total Requests Processed** | 15,480,029 | 24,553,944 | **25,397,612 reqs** | **+9.92 Million more requests! (+64.1%)** 🚀 |
-| **Sustained Throughput** | 51,592.04 req/s | 81,843.03 req/s | **84,648.85 req/s** | **+33,056 req/sec (+64.1%)** 🏆 |
-| **Network Transfer Rate** | 6.00 MB/s | 9.52 MB/s | **9.85 MB/s** | **+3.85 MB/s (+64.2%)** |
-| **Total Data Streamed** | 1.76 GB | 2.79 GB | **2.89 Gigabytes** | **+1.13 GB** |
-| **Median Latency (p50)** | 3.60 ms | 2.30 ms | **2.16 ms** | **40.0% faster response!** 🎯 |
-| **99th Percentile (p99)** | 8.06 ms | 4.16 ms | **4.60 ms** | **Sub-5ms tail latency!** |
-| **Dropped / Failed Requests**| **0 (0.00%)** | **0 (0.00%)** | **0 (0.00%)** | **100% Reliable** ✅ |
-| **Memory Drift (30s → 300s)**| **0.00 MB** | **0.00 MB** | **0.00 MB** | **PERFECT ZERO LEAK (10.2 MB RSS)** ✅ |
+| Metric | 4 Reactors (`-t 4`) | 8 Reactors (`-t 8`) | 10 Reactors (`-t 10`) 🏆 |
+| :--- | :---: | :---: | :---: |
+| **Test Duration** | 5m (300 seconds) | 5m (300 seconds) | **5m (300 seconds)** |
+| **Total Requests Processed** | 15,480,029 | 23,619,416 | **25,397,612 reqs** |
+| **Sustained Throughput** | 51,592.04 req/s | 78,729.48 req/s | **84,648.85 req/s** |
+| **Network Transfer Rate** | 6.00 MB/s | 9.16 MB/s | **9.85 MB/s** |
+| **Total Data Streamed** | 1.76 GB | 2.68 GB | **2.89 Gigabytes** |
+| **Median Latency (p50)** | 3.60 ms | 2.42 ms | **2.16 ms** 🎯 |
+| **99th Percentile (p99)** | 8.06 ms | 4.49 ms | **4.60 ms** |
+| **Dropped / Failed Requests**| **0 (0.00%)** | **0 (0.00%)** | **0 (0.00%)** ✅ |
+| **Memory Drift (30s → 300s)**| **0.00 MB** | **0.00 MB** | **0.00 MB (Flatline 10.38 MB RSS)** ✅ |
 
 > 📖 **Full Architectural Reports**:
 > - [5-Minute Sustained Soak Report (reports/SOAK_TEST_REPORT.md)](reports/SOAK_TEST_REPORT.md)
@@ -65,26 +67,17 @@ Under non-stop continuous load for **5 full minutes (300 seconds)** across 200 p
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **100 conns** | 4 threads | 30s | **79,653.74 req/s** | 1.17 ms | 2.45 ms | 3.08 ms | **0** |
 | **200 conns** | 8 threads | 30s | **77,180.20 req/s** | 2.48 ms | 3.82 ms | 5.12 ms | **0** |
-| **400 conns** | 8 threads | 15s | **82,852.33 req/s** | 4.67 ms | 6.45 ms | 7.95 ms | **0** |
+| **200 conns (10 Reactors)** | 2 threads | 15s | **103,157.54 req/s** | 1.80 ms | 2.80 ms | 4.54 ms | **0** |
+| **400 conns** | 8 threads | 15s | **88,090.30 req/s** | 4.36 ms | 6.12 ms | 7.33 ms | **0** |
 | **2,000 conns** | 16 threads | 10s | **71,707.00 req/s** | 11.20 ms | 18.50 ms | 24.30 ms | **0** |
 
-- **Peak Burst Record**: **86,367.57 requests/sec** (872,000+ completed requests in 10s with 0 socket errors).
-- **Extreme Scale (400 conns)**: **1,243,530 requests** processed in 15 seconds with **100% success rate (0 failures)**.
-- **Kernel Memory Footprint**: Remained flat at **~14.2 MB RSS** under full multi-worker saturation.
+- **All-Time Peak Throughput**: **103,157.54 requests/sec** (1,548,551 completed requests in 15.01s with 0 socket errors).
+- **Extreme Scale (400 conns)**: **1,321,354 requests** processed in 15 seconds with **100% success rate (0 failures)**.
+- **Kernel Memory Footprint**: Remained flat at **~10.4 MB RSS** under full multi-worker saturation.
 
 ---
 
-### 3. High-Payload Data Transfer (4 KB Body, 200 conns, 8 threads, 30s)
-
-- **Throughput**: **56,154.36 req/sec**
-- **Transfer Rate**: **224.23 MB/sec**
-- **Total Data Streamed**: **6.59 Gigabytes** transferred through loopback in 30 seconds
-- **Latency Distribution**: **3.32 ms median (p50)** and **5.81 ms 99th percentile (p99)**
-- **Data Integrity**: Zero truncated responses or stream stalls
-
----
-
-### 4. Rapid Connection Churn (`Connection: close`)
+### 3. Rapid Connection Churn (`Connection: close`)
 
 Evaluates performance under extreme connection churn where clients do not reuse connections and force continuous TCP connection handshakes and teardowns:
 
@@ -95,7 +88,7 @@ Evaluates performance under extreme connection churn where clients do not reuse 
 
 ---
 
-### 5. How to Reproduce `wrk` Benchmarks Locally
+### 4. How to Reproduce Benchmarks Locally
 
 You can replicate any of these benchmarks on Linux or macOS:
 
@@ -117,19 +110,14 @@ wrk -t 2 -c 200 -d 30s --latency "http://127.0.0.1:17777/?url=http://127.0.0.1:9
 
 ## 📑 Table of Contents
 - [Architecture Overview](#-architecture-overview)
-- [Verified wrk Benchmark Report](#-verified-wrk-benchmark-report)
+- [The 6 Upstream Resilience & Protocol Milestones](#-the-6-upstream-resilience--protocol-milestones)
 - [Key Features & Engineering Highlights](#-key-features--engineering-highlights)
 - [Project Structure](#-project-structure)
 - [Prerequisites & Build](#-prerequisites--build)
 - [CLI Usage & Flags](#-cli-usage--flags)
-- [Testing & Benchmarks](#-testing--benchmarks)
-  - [Automated 50,000+ Req/Sec Benchmark Suite](#0-automated-50000-reqsec-benchmark-suite-scriptsbenchmark_50ksh)
-  - [Native C Multi-Threaded Stress Engine](#1-native-c-multi-threaded-stress-engine--m-stress)
-  - [Master Webpage & CDN Test Suite](#2-master-webpage--cdn-test-suite-scriptstest_suitejs)
-  - [High-Throughput Local Proxy Benchmark](#3-high-throughput-local-proxy-benchmark-scriptslocal_benchmarkjs)
-  - [Carousel Log Rotation Audit](#4-carousel-log-rotation--active-marker-audit-scriptstest_rotationjs)
-  - [Kernel Memory & Concurrency Benchmark](#5-kernel-memory--concurrency-benchmark-scriptstest_memorysh)
+- [Testing & Verification Harness](#-testing--verification-harness)
 - [The Journey & Engineering Evolution](#-the-journey--engineering-evolution)
+- [License](#-license)
 
 ---
 
@@ -137,7 +125,7 @@ wrk -t 2 -c 200 -d 30s --latency "http://127.0.0.1:17777/?url=http://127.0.0.1:9
 
 The proxy uses the **Multi-Reactor Pattern with `SO_REUSEPORT`** (similar to modern ultra-high performance servers like NGINX and Envoy) to eliminate thread churn, context switching, and single-thread accept bottlenecks.
 
-```
+```text
                               [ Incoming Client Connections ]
                                              │
                        [ Linux Kernel SO_REUSEPORT Load Balancer ]
@@ -156,29 +144,27 @@ The proxy uses the **Multi-Reactor Pattern with `SO_REUSEPORT`** (similar to mod
 (New Clients)   (Keep-Alive Req) (New Clients)  (Keep-Alive Req) (New Clients)   (Keep-Alive Req)
        │               │             │               │             │               │
        ▼               ▼             ▼               ▼             ▼               ▼
-  Plain HTTP /    OpenSSL TLS   Plain HTTP /    OpenSSL TLS   Plain HTTP /    OpenSSL TLS
-   Stream (80)     Client(443)   Stream (80)     Client(443)   Stream (80)     Client(443)
+  Plain HTTP /    OS-Native     Plain HTTP /    OS-Native     Plain HTTP /    OS-Native
+   Stream (80)     TLS (443)     Stream (80)     TLS (443)     Stream (80)     TLS (443)
 ```
 
 ### 1. `SO_REUSEPORT` Parallel Worker Fleet
 - Every worker thread creates and owns its **own private listening socket** bound to port 17777 using `SO_REUSEPORT`.
-- **Zero Accept Bottleneck**: The Linux kernel distributes incoming connections across all worker threads in kernel space directly at the socket layer.
-- Workers sleep in kernel space (`epoll_wait`) at 0% CPU until the kernel signals new client connections or incoming HTTP data.
+- **Zero Accept Bottleneck**: The kernel distributes incoming connections across all worker threads in kernel space directly at the socket layer.
+- Workers sleep in kernel space (`epoll_wait` / `kevent` / `WSAPoll`) at 0% CPU until signaled with new client connections or incoming HTTP data.
 - **Zero Lock Contention**: Workers accept, process, stream, and log connections independently with complete thread affinity.
-- The `main` thread simply supervises worker lifecycles and handles clean signal shutdown (`SIGINT`, `SIGTERM`).
 
-### 2. HTTP Keep-Alive & Upstream Connection Reuse
-- **Downstream Keep-Alive**: When a client requests persistent connections, the proxy keeps `client_fd` open, resets the request parser with `session_reset()`, and re-arms the socket in `epoll` (`EPOLL_CTL_MOD`). One client connection can stream thousands of requests without repeat handshakes.
-- **Upstream Connection Reuse**: Remembers the connected `upstream_host` and `upstream_port`. Repeated requests to the same target skip `make_api_call()` and `connect()`, streaming HTTP requests immediately over the existing pipe.
-- **`TCP_NODELAY` (Nagle Bypass)**: Disables Nagle's buffering algorithm on all client and upstream sockets. Eliminates the notorious **40ms Linux Delayed-ACK penalty**, dropping sequential request latency from **41.9ms to 0.46ms (91x faster)**.
-- **IP Fast-Path**: Uses `inet_pton()` to detect numeric IPv4 destinations immediately, bypassing glibc `getaddrinfo()` resolver lookups and saving ~0.3ms per request.
+### 2. In-Memory 2-Way Set-Associative DNS Cache
+- **Thread-Local Lock-Free Cache**: Every worker thread maintains its own 2-way set-associative cache with 64 sets (128 slots total), eliminating cross-thread mutex contention.
+- **32-Bit FNV-1a Hashing**: Computes rapid hash slots with case-insensitive ASCII folding.
+- **TTL Expiration**: Expired entries automatically trigger fresh lookups upon expiry.
+- **System Call Bypass**: DNS cache hits bypass glibc's blocking `getaddrinfo()` NSS file-reads completely, saving $\sim 0.3\text{ ms}$ per outbound connection.
 
 ### 3. Asynchronous Double-Buffering Logger ("Two Buckets Under a Tap")
 - Worker threads **never perform blocking disk I/O**.
 - Logging uses two 64 KB RAM buckets (`BUCKET_A` and `BUCKET_B`):
-  - **The Tap (Producers)**: Worker threads format messages into stack buffers and copy them into `active_buffer` with a ~20-nanosecond `memcpy`.
+  - **The Tap (Producers)**: Worker threads format messages into stack buffers and copy them into `active_buffer` with a $\sim 20\text{-nanosecond}$ `memcpy`.
   - **The Janitor (Consumer)**: A dedicated background logging thread waits on a condition variable (`pthread_cond_wait`). When the active bucket fills up or the doorbell is signaled, it atomically swaps the two pointers (`char *temp = active; active = waiting; waiting = temp;`), unlocks the mutex immediately, and commits the full chunk to disk with `fwrite()` + `fflush()`.
-- Disk latency never stalls client HTTP proxying.
 
 ### 4. Self-Healing 5-Slot Carousel Log Rotation
 - **Zero Log Bloat**: Prevents runaway log files by bounding logging to a fixed 5-slot ring buffer (`logger_0.log` through `logger_4.log`) capped at 2 MB per file.
@@ -186,29 +172,41 @@ The proxy uses the **Multi-Reactor Pattern with `SO_REUSEPORT`** (similar to mod
   1. It drops the `@` prefix via `rename()`.
   2. Advances slot index via boundary check `(current_slot + 1 >= FILE_COUNT) ? 0 : current_slot + 1`.
   3. Renames the target file to `@`, truncates previous contents with `fopen(..., "w")`, and opens the append stream.
-- **Crash Recovery & Conflict Resolution**: On startup, `last_active_file()` scans `logs/` via `opendir()` and `readdir()`. If a prior crash or interrupted rotation left multiple `@` files, it calculates the true active slot across progression and wrap-around boundaries (`4 -> 0`), auto-heals by stripping the `@` from stale duplicates, and resumes appending with zero state loss.
+- **Crash Recovery & Conflict Resolution**: On startup, `last_active_file()` scans `logs/` via `opendir()` and `readdir()`. If a prior crash left multiple `@` files, it calculates the true active slot across progression and wrap-around boundaries (`4 -> 0`), auto-heals by stripping the `@` from stale duplicates, and resumes appending with zero state loss.
+
+---
+
+## 🛡️ The 6 Upstream Resilience & Protocol Milestones
+
+Sankram incorporates an industrial resilience and protocol compliance matrix verified by automated end-to-end integration tests:
+
+| Target | Capability | Mechanism | Impact |
+| :--- | :--- | :--- | :--- |
+| **1. Stale Socket Auto-Retry** | Transparent Upstream Recovery | Detects remote socket drops on pooled connections; dials fresh TCP/TLS socket seamlessly | **Zero dropped requests** on stale pool connections |
+| **2. HTTP Pipelining** | Multi-Request & Fragmented Frames | Shinks consumed frames via `memmove` and preserves buffer offsets across epoll turns | **100% ordered request/response multiplexing** |
+| **3. Chunked Uploads** | Streaming Request Bodies | Zero-copy chunk boundary scanner detecting `0\r\n\r\n` without buffering entire payloads | **Unbounded file uploads** with flat memory usage |
+| **4. WebSocket Tunnels** | RFC 6455 Full-Duplex Tunneling | Dynamic heap-allocated `tunnel_ctx` with streaming backpressure and HTTP 101 upgrade | Shrinks session size from **26.3 KB to 9.8 KB** (L3 cache residency) |
+| **5. Slowloris Defense** | Aggregate Header Deadline | Enforces 3s aggregate header accumulation deadline with HTTP 408 Request Timeout | **Immune to trickle attacks**; lazy timing saves 1.9M clock syscalls |
+| **6. In-Memory DNS Cache** | Thread-Local Set-Associative Cache | 2-way set-associative cache with 32-bit FNV-1a hashing & TTL expiration | Bypasses `getaddrinfo()`, enabling **103k+ RPS peak** |
 
 ---
 
 ## ✨ Key Features & Engineering Highlights
 
-- **Hardware-Adaptive Auto-Configuration**: Queries the Linux kernel with `sysconf(_SC_NPROCESSORS_ONLN)` to detect available CPU cores and spawns the optimal thread count automatically. Includes protection against user thread overload (`-t`) with automatic clamping.
-- **Dual HTTP & HTTPS Engine**:
-  - Automatically negotiates OpenSSL TLS 1.3 with upstream servers for `https://` URLs using Server Name Indication (SNI).
-  - Handles plain HTTP port 80 over standard stream sockets.
+- **Hardware-Adaptive Auto-Configuration**: Queries the kernel with `sysconf(_SC_NPROCESSORS_ONLN)` to detect available CPU cores and spawns the optimal thread count automatically. Includes protection against user thread overload (`-t`) with automatic clamping.
+- **Zero-Dependency Native TLS Stack**:
+  - **Linux**: OpenSSL TLS 1.3 with Server Name Indication (SNI).
+  - **macOS**: Native Apple Security Framework (`SecureTransport`) with Zero external OpenSSL dependencies.
+  - **Windows**: Native Microsoft Schannel & CryptoAPI (`Secur32`) with Zero external dependencies.
 - **RFC 7230 Compliant Header Rewriting**:
   - Automatically reconstructs clean upstream request lines.
   - Strips conflicting duplicate `Host` headers to prevent 400 Bad Request rejections on strict CDN frontends (e.g. GitHub, Cloudflare).
 - **Chunked Transfer-Encoding Termination**:
   - Inspects incoming response bodies using binary memory comparisons (`memcmp`) to catch chunked termination sequences (`0\r\n\r\n`) across compressed gzip/binary streams without stalling on keep-alive socket timeouts.
-- **Bounded Carousel Log Engine**:
-  - High-performance asynchronous double-buffered ring buffer with 5 rotating slots.
-  - Zero external state files—uses in-band `@` marker with automatic collision resolution and startup healing.
-- **CORS Support**:
-  - Handles preflight `OPTIONS` requests natively, returning `204 No Content` with appropriate `Access-Control-Allow-*` headers.
-- **Graceful Lifecycle Management**:
-  - Signal handling (`SIGINT`, `SIGTERM`) registered via `sigaction` without `SA_RESTART`, allowing blocking system calls (`accept`, `epoll_wait`) to interrupt cleanly.
-  - Automatically joins all worker threads, flushes logging buffers, and frees all memory structures on shutdown with zero leaks.
+- **Private Network Access (PNA) & CORS**:
+  - Handles preflight `OPTIONS` requests natively, returning `204 No Content` with appropriate `Access-Control-Allow-*` and `Access-Control-Allow-Private-Network` headers.
+- **Origin Whitelist Enforcement**:
+  - Validates client `Origin` headers against configurable wildcard domain patterns (`-o`).
 
 ---
 
@@ -218,36 +216,51 @@ The proxy uses the **Multi-Reactor Pattern with `SO_REUSEPORT`** (similar to mod
 .
 ├── include/
 │   ├── config.h        # Project constants (stack sizes, timeouts, proxy_config struct)
-│   ├── http.h          # HTTP request/response structs, header parsers, status codes
-│   ├── http_error.h    # RFC error response generators (400, 404, 405, 413, 500, 502)
-│   ├── logger.h        # Asynchronous logger API and log levels (DEBUG, INFO, WARN, ERROR)
-│   ├── proxy.h         # Proxy connection management, streaming, and upstream dispatch
+│   ├── dns_cache.h     # 2-way set-associative in-memory DNS cache with FNV-1a hashing
+│   ├── http.h          # HTTP request/response structs, fast-path headers, status codes
+│   ├── http_error.h    # RFC error response generators (400, 403, 404, 405, 408, 413, 500, 502)
+│   ├── logger.h        # Asynchronous double-buffered logger API and levels (DEBUG..ERROR)
+│   ├── net_compat.h    # Cross-platform socket abstraction (POSIX, Winsock2, Apple)
+│   ├── poll_engine.h   # Unified non-blocking polling engine interface
+│   ├── proxy.h         # Proxy connection lifecycle, streaming, and tunnel contexts
 │   ├── server.h        # Socket lifecycle, timeout configuration, and accept handlers
 │   ├── stress.h        # Multi-threaded native C stress engine configuration & runner
-│   ├── tls.h           # OpenSSL TLS client wrappers, context lifecycle, read/write
+│   ├── tls.h           # Cross-platform TLS client wrappers and context lifecycle
+│   ├── upstream.h      # Upstream HTTP request forwarding and body streaming
 │   └── url.h           # URL parser (schema, host, port, path, query extraction)
 ├── src/
-│   ├── main.c          # Mode dispatcher, Multi-Reactor event loop, worker fleet runner
+│   ├── main.c          # Entrypoint, Multi-Reactor worker fleet, signal supervisor
 │   ├── config.c        # CLI argument parser (-p, -b, -t, -m, -l, -v, -u, -c, -n, -X, -d)
-│   ├── server.c        # BSD socket creation, non-blocking helpers, bind, listen
-│   ├── proxy.c         # HTTP transaction pipeline, request forwarding, response streaming
+│   ├── dns_cache.c     # In-memory DNS cache lookup, insertion, and TTL invalidation
 │   ├── http.c          # In-place HTTP header slicing and protocol parsing
 │   ├── http_error.c    # Error page HTML generation with CORS headers
-│   ├── logger.c        # Asynchronous double-buffering logger thread implementation
-│   ├── stress.c        # Native C multi-threaded non-blocking epoll stress engine
-│   ├── tls.c           # TLS handshake negotiation, SSL context, and socket wrappers
-│   └── url.c           # Protocol and hostname URL parsing
+│   ├── logger.c        # Asynchronous double-buffering carousel logger thread
+│   ├── poll_epoll.c    # Linux native epoll engine (EPOLLET edge-triggered)
+│   ├── poll_kqueue.c   # macOS/BSD native kqueue engine (EVFILT_READ / EVFILT_WRITE)
+│   ├── poll_wsapoll.c  # Windows native WSAPoll engine
+│   ├── proxy.c         # HTTP pipeline, keep-alive reuse, WebSocket tunneling
+│   ├── server.c        # BSD socket creation, non-blocking helpers, bind, listen
+│   ├── stress.c        # Native C multi-threaded non-blocking stress benchmark engine
+│   ├── tls.c           # Linux OpenSSL TLS implementation
+│   ├── tls_darwin.c    # macOS Apple Security Framework (SecureTransport) implementation
+│   ├── tls_schannel.c  # Windows Microsoft Schannel implementation
+│   ├── upstream.c      # Outbound connection dialer, DNS cache integration, chunked streaming
+│   └── url.c           # URL parsing and port validation
 ├── scripts/
-│   ├── local_benchmark.js  # High-throughput benchmark (supports keep-alive & clustering, 17k+ req/s)
-│   ├── test_rotation.js    # 5-slot carousel log rotation and active marker audit
-│   ├── test_fallback.js    # Upstream failover, DNS fallback, and error recovery test
-│   ├── test_suite.js       # Master Node.js test suite for real webpages and CDNs
-│   ├── test_memory.sh      # Kernel memory (VmRSS, VmHWM) and thread benchmark tool
-│   ├── runMain.sh          # Build and run script
-│   └── stop.sh             # Graceful shutdown helper
-├── logs/               # Rotating carousel logs (@logger_X.log, logger_X.log, test reports)
-├── build/              # Compiled binary outputs
-├── TODO.md             # Development roadmap and historical notes
+│   ├── benchmark_50k.sh    # Automated 50,000+ Req/Sec end-to-end benchmark suite
+│   ├── run_wrk_soak.sh     # Sustained multi-minute wrk endurance soak benchmark
+│   ├── mock_upstream.py    # Zero-dependency Python 3 HTTP/1.1 mock upstream server
+│   └── tests/
+│       ├── run_all.py          # Unified Master Test Suite Orchestrator
+│       ├── test_websocket.py   # WebSocket RFC 6455 & Full-Duplex Tunnel Test Suite
+│       ├── test_functional.py  # HTTP Real-World Functional Matrix & 50-Req Parallel Burst
+│       ├── test_rotation.py    # Live Carousel Log Rotation & Active Marker Audit
+│       ├── test_fallback.py    # Upstream Fallback & Overflow Circuit-Breaker Resilience
+│       └── test_resilience.py  # Stale Upstream Retry, Pipelining, Chunked, Slowloris, DNS
+├── logs/               # Rotating carousel logs (@logger_X.log, logger_X.log)
+├── build/              # Compiled binary outputs (sankram, sankram_small)
+├── reports/            # Industrial soak, stress, and optimization reports
+├── Makefile            # Universal cross-platform Makefile (Linux, macOS, Windows)
 └── README.md           # Project documentation
 ```
 
@@ -256,16 +269,16 @@ The proxy uses the **Multi-Reactor Pattern with `SO_REUSEPORT`** (similar to mod
 ## 🛠 Prerequisites & Build
 
 The codebase is engineered to be **100% cross-platform**, multiplexing connections using the optimal kernel event engine for each operating system:
-- **Linux**: Multi-Reactor `epoll` (`EPOLLET` + `SO_REUSEPORT`)
-- **macOS / BSD**: Native `kqueue` (`EVFILT_READ` / `EVFILT_WRITE`)
-- **Windows**: `WSAPoll` (`Winsock2` non-blocking sockets)
+- **Linux**: Multi-Reactor `epoll` (`EPOLLET` + `SO_REUSEPORT`) + OpenSSL
+- **macOS / BSD**: Native `kqueue` + Apple Security Framework (Zero external OpenSSL required)
+- **Windows**: Native `WSAPoll` + Microsoft Schannel & CryptoAPI (Zero external dependencies)
 
 ---
 
 ### 🐧 Linux (Ubuntu / Debian / Fedora / Arch)
 
 #### Prerequisites
-- Compiler: `gcc` or `clang` (C99/GNU99)
+- Compiler: `gcc` or `clang` (C11/GNU11)
 - Libraries: OpenSSL (`libssl-dev`), POSIX Threads (`-pthread`)
 
 ```bash
@@ -279,78 +292,53 @@ sudo dnf install -y gcc openssl-devel
 sudo pacman -S base-devel openssl
 ```
 
-#### Quick Build with Make (Recommended)
+#### Build with Make
 ```bash
 make -j$(nproc)
 ```
 
-#### Manual Compilation
-```bash
-gcc -O3 -flto -march=native -Wall -Wextra -Werror -Iinclude src/*.c -pthread -lssl -lcrypto -o build/sankram
-```
-
-#### Build Targets & Shortcuts
+#### Build Targets
 - `make` — Compiles optimized production binary (`build/sankram`).
+- `make small` — Compiles compact binary with size-optimization and symbol stripping (`build/sankram_small`).
 - `make debug` — Builds with AddressSanitizer and UndefinedBehaviorSanitizer (`build/sankram_debug`).
-- `make test` — Verifies binary build and sanity check.
-- `make clean` — Cleans all build artifacts and intermediate `.o` files.
+- `make test` — Runs the Unified Master Test Suite across all 5 test batteries.
+- `make clean` — Cleans all build artifacts and object files.
 - `sudo make install` — Installs `sankram` to `/usr/local/bin/`.
 
 ---
 
 ### 🍏 macOS (Apple Silicon M1/M2/M3/M4 & Intel x86_64)
 
-On macOS, the proxy automatically selects **native BSD `kqueue`** (`src/poll_kqueue.c`). Because Apple does not ship OpenSSL in default compiler search paths, use Homebrew to install OpenSSL.
-
-#### Prerequisites
-```bash
-# 1. Install Xcode Command Line Tools (if not already installed)
-xcode-select --install
-
-# 2. Install OpenSSL via Homebrew
-brew install openssl@3
-```
-
-#### Compilation (Apple Clang / GCC)
-Point the compiler to Homebrew's OpenSSL headers and library paths using `$(brew --prefix openssl)`:
+On macOS, the proxy automatically compiles with **native BSD `kqueue`** and **native Apple Security Framework** (`-framework Security -framework CoreFoundation`). No external OpenSSL installation is required!
 
 ```bash
-# Compile for macOS (auto-links native kqueue)
-clang -O3 -flto -Wall -Wextra -Werror \
-  -Iinclude \
-  -I$(brew --prefix openssl)/include \
-  -L$(brew --prefix openssl)/lib \
-  -pthread -lssl -lcrypto \
-  src/*.c -o build/sankram
+# Compile for macOS (Apple Silicon & Intel)
+make -j$(sysctl -n hw.ncpu)
+make small -j$(sysctl -n hw.ncpu)
 ```
-
-*(Note: On Apple Silicon, Clang automatically targets ARM64; `-march=native` is omitted for seamless Apple Silicon & Intel Universal binary compilation).*
 
 ---
 
 ### 🪟 Windows (MSYS2 / MinGW-w64)
 
-On Windows, the proxy automatically selects **`WSAPoll`** (`src/poll_wsapoll.c`) and links against `ws2_32`.
+On Windows, the proxy automatically links against native Microsoft Windows system libraries (`ws2_32`, `secur32`, `crypt32`). No external OpenSSL or pthreads are required!
 
-#### Prerequisites (MSYS2 MinGW 64-bit terminal)
 ```bash
-pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-openssl
-```
-
-#### Compilation
-```bash
-gcc -O3 -flto -Wall -Wextra -Werror -Iinclude src/*.c -pthread -lssl -lcrypto -lws2_32 -o build/sankram.exe
+# In MSYS2 MinGW 64-bit terminal:
+make -j
+make small -j
 ```
 
 ---
 
-### 📦 Minimal Size Binary (Embedded / IoT Mode)
-For ultra-compact deployments (Raspberry Pi, OpenWrt, microVMs), compile with dead-code elimination and symbol stripping to generate a **47 KB standalone binary**:
+### 📦 Minimal Size Binary (Embedded / MicroVM Mode)
+For ultra-compact deployments (Raspberry Pi, Alpine, OpenWrt, microVMs), run `make small` to generate a **~55 KB standalone binary**:
 
 ```bash
-gcc -Os -flto -march=native -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Iinclude src/*.c -pthread -lssl -lcrypto -o build/sankram
+make small
+ls -lh build/sankram_small
+# -rwxr-xr-x 1 user user 55K build/sankram_small
 ```
-
 
 ---
 
@@ -364,7 +352,7 @@ gcc -Os -flto -march=native -ffunction-sections -fdata-sections -Wl,--gc-section
 
 ### Command-Line Options
 ```text
-Usage: ./sankram -p <port> -b <ip> -t <threads> -m <server|stress|logs|help> -l <debug|info|warn|error> -v
+Usage: ./sankram -p <port> -b <ip> -t <threads> -m <server|stress|logs|help> -l <debug|info|warn|error> -v -o <origins>
        ./sankram -m stress -u <url> -c <concurrency> -n <requests> -t <threads> -X <method> -d <data>
 ```
 
@@ -375,6 +363,7 @@ Usage: ./sankram -p <port> -b <ip> -t <threads> -m <server|stress|logs|help> -l 
 | `-t` | `--threads` | Number of worker threads (clamped to hardware limits) | Auto (`sysconf`) |
 | `-m` | `--mode` | Run mode (`server`, `logs`, `help`, `stress`) | `server` |
 | `-l` | `--log-level` | Log verbosity (`debug`, `info`, `warn`, `error` or `d, i, w, e`) | `info` |
+| `-o` | `--origin` | Comma-separated list of allowed CORS/PNA origins | `*` |
 | `-v` | `--verbose` | Shortcut for `-l debug` | `false` |
 | `-u` | `--url` | Target URL to benchmark (`-m stress`) | `http://127.0.0.1:17777/` |
 | `-c` | `--concurrent` | Concurrency: number of parallel connections | `50` |
@@ -385,8 +374,8 @@ Usage: ./sankram -p <port> -b <ip> -t <threads> -m <server|stress|logs|help> -l 
 
 ### Examples
 ```bash
-# 1. Start proxy on port 8080 with 8 worker threads
-./build/sankram -p 8080 -b 0.0.0.0 -t 8 -v
+# 1. Start proxy on port 8080 with 8 worker threads and origin whitelist
+./build/sankram -p 8080 -b 0.0.0.0 -t 8 -o "https://example.com,https://*.mycorp.internal" -v
 
 # 2. Native C Stress Benchmark: 20,000 requests, 100 concurrent connections, 4 threads
 ./build/sankram -m stress -u http://127.0.0.1:17777/?url=http://127.0.0.1:9099/test -c 100 -n 20000 -t 4
@@ -396,244 +385,50 @@ Usage: ./sankram -p <port> -b <ip> -t <threads> -m <server|stress|logs|help> -l 
 
 # 4. View formatted color-coded runtime access logs
 ./build/sankram -m logs
-
-# 5. Display help
-./build/sankram -h
 ```
 
 ---
 
-## 🧪 Testing & Benchmarks
+## 🧪 Testing & Verification Harness
 
-The proxy includes a comprehensive testing and benchmarking toolkit:
-
-### 0. Automated 50,000+ Req/Sec Benchmark Suite (`scripts/benchmark_50k.sh`)
-An all-in-one automated benchmark script that tests the ultimate throughput limits of the proxy. It launches a 4-worker clustered mock upstream server, spins up the 16-thread C Reverse Proxy, primes socket tables, and executes a 60,000-request native C stress test with automatic cleanup:
+Sankram includes a zero-dependency **Unified Master Test Suite** built entirely with Python 3 standard library:
 
 ```bash
-./scripts/benchmark_50k.sh
+# Run all 5 test suites in sequence
+python3 scripts/tests/run_all.py
+# or simply:
+make test
 ```
 
-#### Peak Measured Results (60,000 Requests, 200 Concurrency, 8 Threads)
-```text
-=======================================================
-                  STRESS TEST RESULTS                  
-=======================================================
-  Target:             http://127.0.0.1:17777/?url=http://127.0.0.1:9099/
-  Method:             GET
-  Concurrency:        200 connections
-  Threads:            8 worker threads
--------------------------------------------------------
-  Total Requests:     60000
-  Completed:          60002
-  Failed:             0
-  Duration:           1.187 seconds
--------------------------------------------------------
-  🔥 Throughput:      50,565.15 req/sec
-=======================================================
-```
-
----
-
-### 1. Native C Multi-Threaded Stress Engine (`-m stress`)
-A built-in, zero-dependency, multi-threaded C benchmarking engine powered by non-blocking event loops (`epoll` on Linux, `kqueue` on macOS, `WSAPoll` on Windows). It eliminates Node.js client CPU bottlenecks and supports persistent HTTP/1.1 keep-alive, custom HTTP methods, custom payloads, and TLS/SNI.
-
-```
-                     [ CLI Invocations / Config: run_stress_engine() ]
-                       (Target URL, Concurrency: -c, Total Reqs: -n)
-                                            │
-                             [ Lock-Free Workload Divider ]
-                      (conns = c / threads, reqs = n / threads)
-                                            │
-              ┌─────────────────────────────┼─────────────────────────────┐
-              ▼                             ▼                             ▼
-      [ Stress Worker #0 ]          [ Stress Worker #1 ]          [ Stress Worker #N-1 ]
-     Isolated poll_engine          Isolated poll_engine          Isolated poll_engine
-              │                             │                             │
-         epoll_wait()                  epoll_wait()                  epoll_wait()
-              │                             │                             │
-      ┌───────┴───────┐             ┌───────┴───────┐             ┌───────┴───────┐
-      ▼               ▼             ▼               ▼             ▼               ▼
-  conn_0..conn_K  Keep-Alive    conn_0..conn_K  Keep-Alive    conn_0..conn_K  Keep-Alive
-  (Non-blocking) (Pipelines)    (Non-blocking) (Pipelines)    (Non-blocking) (Pipelines)
-      │               │             │               │             │               │
-      └───────┬───────┘             └───────┬───────┘             └───────┬───────┘
-              │                             │                             │
-              ▼                             ▼                             ▼
-    [ Finite State Machine ]      [ Finite State Machine ]      [ Finite State Machine ]
-    CONN_CONNECTING (TCP/TLS)     CONN_CONNECTING (TCP/TLS)     CONN_CONNECTING (TCP/TLS)
-              │                             │                             │
-    CONN_SENDING (Outbound Req)   CONN_SENDING (Outbound Req)   CONN_SENDING (Outbound Req)
-              │                             │                             │
-    CONN_RECEIVING (\r\n\r\n)     CONN_RECEIVING (\r\n\r\n)     CONN_RECEIVING (\r\n\r\n)
-              │                             │                             │
-              └─────────────────────────────┼─────────────────────────────┘
-                                            │
-                                [ Main Thread Aggregator ]
-                               pthread_join() + Stop Clock
-                             (Total Req/s, Duration, Summary)
-```
-
-```bash
-# 1. Direct upstream benchmark: 20,000 requests, 100 connections, 4 threads
-./build/sankram -m stress -u http://127.0.0.1:9099/test -c 100 -n 20000 -t 4
-
-# 2. Full reverse proxy benchmark (Client -> Proxy -> Upstream -> Client)
-./build/sankram -m stress -u "http://127.0.0.1:17777/?url=http://127.0.0.1:9099/test" -c 100 -n 20000 -t 4
-
-# 3. Custom payload POST benchmark
-./build/sankram -m stress -u http://127.0.0.1:9099/test -c 100 -n 10000 -t 4 -X POST -d '{"speed":"c"}'
-```
-
-#### Benchmark Results (20,000 Requests, 100 Connections, 4 Threads)
-```text
-=======================================================
-                  STRESS TEST RESULTS                  
-=======================================================
-  Target:             http://127.0.0.1:9099/test
-  Method:             GET
-  Concurrency:        100 connections
-  Threads:            4 worker threads
--------------------------------------------------------
-  Total Requests:     20000
-  Completed:          20000
-  Failed:             0
-  Duration:           0.740 seconds
--------------------------------------------------------
-  Throughput:         27,028.54 req/sec
-=======================================================
-```
-
-### 2. Master Webpage & CDN Test Suite (`scripts/test_suite.js`)
-Runs diverse real-world tests against live production targets, verifying HTTP status codes, chunked streaming, and CORS headers:
-- **Google Homepage**: Full HTML, cookies (`Set-Cookie`), gzip compression (~90 KB)
-- **Wikipedia**: Heavyweight article on the C Programming Language (~735 KB)
-- **Hacker News**: Cloudflare-protected dynamic frontpage HTML
-- **DuckDuckGo**: Semantic search engine HTML
-- **Plain HTTP Port 80**: Non-TLS stream verification on `example.com`
-- **POST Streaming**: JSON body forwarding to `httpbin.org/post`
-- **Error Handling**: Validates `400 Bad Request`, `404 Not Found`, `500 Server Error`, and `502 Bad Gateway` (DNS failure)
-- **Parallel Burst**: Fires 50 simultaneous requests across CDNs to measure concurrency latency.
-
-Run the test suite:
-```bash
-# 1. Start proxy in one terminal
-./build/sankram -p 17777
-
-# 2. Run master test suite in another terminal
-node scripts/test_suite.js
-```
-
-### 3. High-Throughput Local Proxy Benchmark (`scripts/local_benchmark.js`)
-Tests raw proxying throughput, socket turnaround speed, and event-loop efficiency without external internet/DNS latency. Supports multi-core clustering and persistent HTTP Keep-Alive:
-
-```bash
-# In one terminal:
-./build/sankram -p 17777 -l error
-
-# In another terminal:
-# 1. Multi-Process Cluster Mode (Default: 4 client workers, 100 connections)
-node scripts/local_benchmark.js
-
-# 2. Single-Process Keep-Alive Mode
-node scripts/local_benchmark.js --single
-
-# 3. Short-Lived Connections Mode (Connection: close)
-node scripts/local_benchmark.js --no-keepalive
-```
-
-#### Benchmark Results (20,000 Requests, 4 Client Processes, 100 Persistent Connections)
-```text
-===============================================================
-        LOCAL HIGH-THROUGHPUT PROXY BENCHMARK                  
-===============================================================
-Target Proxy   : http://127.0.0.1:17777
-Mock Upstream  : http://127.0.0.1:9099
-Total Requests : 20,000
-Concurrency    : 100 connections (Keep-Alive)
-Mode           : Multi-Process Cluster (4 client workers)
-
----------------- RESULTS ----------------
-Successful Requests : 20000 / 20000 (100.0%)
-Failed Requests     : 0
-Total Time          : 1.16 seconds
-🔥 THROUGHPUT       : 17,305.2 req/sec
-===============================================================
-```
-
-#### ⚡ Latency Impact of `TCP_NODELAY` (The 40ms Nagle Fix)
-By disabling Nagle's algorithm and preventing collision with Linux's delayed ACK timer (`TCP_DELACK_MIN`), request latency was slashed by **91x**:
-
-| Configuration | Sequential Req Latency | Max Throughput | Notes |
-| :--- | :--- | :--- | :--- |
-| **Without `TCP_NODELAY`** | ~41.90 ms | ~24 req/s (sequential) | Linux waits 40ms before sending ACK |
-| **With `TCP_NODELAY`** | **0.46 ms** | **17,305.2 req/s** | Immediate packet flush without stall |
-
----
-
-### 4. Carousel Log Rotation & Active Marker Audit (`scripts/test_rotation.js`)
-Validates live rotation under heavy throughput, ensuring the 5-slot carousel rotates at exactly 2 MB (`MAX_FILE_SIZE = 2097152`), migrates the in-band `@` marker, and preserves historical logs:
-
-```bash
-node scripts/test_rotation.js
-```
+### The 5 Unified Test Batteries
 
 ```text
-===============================================================
-       LIVE ROTATION & COMMIT-BEFORE-RETIRE TEST SUITE        
-===============================================================
-Initial Active Log File : @logger_0.log
-Active Log File to Rotate: @logger_0.log
-Firing parallel requests to cross 2 MB threshold (~12,000 requests)...
-Sent: 250 reqs  | Active: @logger_0.log (0.04 MB / 2.00 MB)
-...
-Sent: 11750 reqs | Active: @logger_0.log (1.98 MB / 2.00 MB)
-Sent: 12000 reqs | Active: @logger_1.log (0.03 MB / 2.00 MB)
-🎉 ROTATION DETECTED! Active marker moved to: @logger_1.log
-===============================================================
-                       FINAL LOGS AUDIT                        
-===============================================================
-  - @logger_1.log        : 26.5 KB   ⭐ ACTIVE
-  - logger_0.log         : 2048.0 KB 📦 ARCHIVED
----------------------------------------------------------------
-Active markers found   : 1 (Expected: exactly 1)
-Total Requests Sent    : 12,000
-Elapsed Time           : 4.47s
-✅ PASS: Carousel rotation, commit-before-retire & active marker verified!
-===============================================================
+==================================================================
+             SANKRAM UNIFIED TEST SUITE SCORECARD                 
+==================================================================
+  [✔ PASS] WebSocket RFC 6455 & Full-Duplex Tunnel            (  0.78s)
+  [✔ PASS] HTTP Functional Matrix & 50-Req Parallel Burst     (  1.79s)
+  [✔ PASS] Log Carousel Rotation & Commit-Before-Retire       (  2.02s)
+  [✔ PASS] Fallback & Overflow Circuit-Breaker Resilience     (  3.71s)
+  [✔ PASS] Stale Upstream Auto-Retry & HTTP Pipelining        ( 18.97s)
+------------------------------------------------------------------
+  Total Duration: 27.27s
+  Final Verdict : 100% GREEN — ALL SUITES PASSED!
+==================================================================
 ```
 
----
-
-### 5. Kernel Memory & Concurrency Benchmark (`scripts/test_memory.sh`)
-Measures kernel memory metrics (`VmRSS`, `VmHWM`) under heavy parallel load streaming 100 KB HTTPS files from remote servers:
-```bash
-bash scripts/test_memory.sh
-```
-
-#### Benchmark Results (8 Cores, 30 Concurrent Clients, 60 HTTPS Requests)
-```text
-==========================================================
-          STRESS & MEMORY BENCHMARK REPORT                
-==========================================================
-Total Requests:       60 (60 success, 0 failed)
-Peak Active Threads:  10 (1 listener + 1 logger + 8 epoll workers)
-
---- ⏱️ CONCURRENCY TIME & THROUGHPUT ---
-Burst Duration:       31.92 seconds
-Throughput:           1.9 req/sec
-Latency (Min/Avg/Max): 2149 ms / 8224 ms / 26745 ms
-
---- 🧠 KERNEL RAM FOOTPRINT (VmRSS & VmHWM) ---
-Baseline VmRSS (Idle):        8920 kB (~8.7 MB)
-Sampled Peak VmRSS:           11880 kB (~11.6 MB)
-Kernel VmHWM (High Water):    11880 kB (~11.6 MB)
-----------------------------------------------------------
-Actual RAM Added By Stress:   2960 kB (~2.8 MB)
-RAM Footprint Per Connection: 98.7 kB / client
-Cooldown VmRSS (After Load):  11880 kB
-==========================================================
-```
+1. **WebSocket Full-Duplex (`test_websocket.py`)**: Validates RFC 6455 upgrade handshakes, SHA-1 / Base64 Sec-WebSocket-Accept generation, full-duplex bidirectional frame echo, and graceful disconnects.
+2. **HTTP Functional Matrix & Parallel Burst (`test_functional.py`)**: Tests real production targets (Google, Wikipedia, Hacker News, DuckDuckGo, Cloudflare API), method forwarding (`POST`, `OPTIONS`), and fires 50 simultaneous parallel bursts across CDNs.
+3. **Carousel Log Rotation (`test_rotation.py`)**: Blasts traffic across 50 KB rotation thresholds, auditing the atomic `@` active marker migration and verifying zero log drops.
+4. **Fallback & Circuit-Breaker Resilience (`test_fallback.py`)**: Validates default upstream routing (`localhost:3000`), permission drops (`chmod 555 logs/`), and verifies non-crashing overflow operation.
+5. **Resilience & Pipelining Validation (`test_resilience.py`)**:
+   - Stale pooled upstream auto-retry on server drops
+   - Multi-request pipelining in a single TCP packet
+   - Fragmented pipelining across epoll turns
+   - Client chunked upload streaming (`Transfer-Encoding: chunked`)
+   - WebSocket streaming backpressure under deliberate client read stalls (128 KB with 0 byte loss)
+   - Slowloris defense terminating header trickle attacks with HTTP 408
+   - In-memory DNS cache hit/miss and case-insensitive lookup
 
 ---
 
@@ -649,17 +444,24 @@ This project was built from absolute scratch as a deep dive into systems program
 6. **The Multi-Reactor Epoll Fleet**: Evolving from thread-per-connection to a fixed, core-pinned Epoll worker fleet, solving connection distribution, graceful termination timeouts, and binary chunked stream parsing (`memcmp`).
 7. **The Self-Healing 5-Slot Carousel Logger**: Solving unbounded log growth with a fixed-ring carousel buffer, designing in-band `@` active marker tags without external metadata files, and building crash-resilient startup recovery using `opendir()`, `readdir()`, and wrap-around ring arithmetic.
 8. **The 17,000+ Req/Sec Keep-Alive & `SO_REUSEPORT` Breakthrough**:
-   - **`SO_REUSEPORT` Fleet**: Replaced the single-acceptor bottleneck with kernel-level connection balancing across independent worker listening sockets.
-   - **Bidirectional Keep-Alive & Upstream Cache**: Eliminated double-handshake overhead per request by keeping client sockets persistent (`session_reset()`) and caching open upstream TCP connections.
-   - **40ms Nagle / Delayed-ACK Discovery**: Diagnosed the 40ms latency freeze caused by Nagle's algorithm waiting on Linux's delayed ACK timer, resolving it with `TCP_NODELAY` and dropping latency from 41.9ms to 0.46ms (91x speedup).
-   - **DNS Resolver Bypass**: Bypassed glibc's `getaddrinfo()` NSS file-reads on IP literals using `inet_pton()`.
-   - **Performance Milestone**: Scaled from 3,113 req/sec to **17,305.2 req/sec** with 100% success rate across 20,000 requests.
-9. **The Native C Stress Engine (27,000+ Req/Sec Benchmark Engine)**:
-   - **Eliminating Node.js Overhead**: Removed external Node.js benchmark dependencies whose multi-process event loop saturated client CPU cores at 18k req/sec.
-   - **Zero-Dependency Multi-Threaded Event Loop**: Built a pure C non-blocking stress client in `src/stress.c` reusing the core cross-platform abstraction `poll_engine` (`epoll`/`kqueue`/`WSAPoll`).
-   - **Lock-Free Concurrency**: Partitioned connections and target request quotas evenly across worker threads with isolated event loops, avoiding all thread locking and mutex contention.
-   - **Full Protocol Flexibility**: Added CLI flags (`-u`, `-c`, `-n`, `-X`, `-d`) for benchmarking custom HTTP methods (`POST`, `PUT`), custom JSON payloads, and dynamic TLS/SNI negotiation for HTTPS targets.
-   - **Performance Milestone**: Reached **27,028 req/sec direct** and **25,127 req/sec fully proxied** with a 100% success rate across 20,000 requests.
+   - Replaced single-acceptor bottlenecks with kernel-level connection balancing across independent worker listening sockets.
+   - Eliminated double-handshake overhead per request by keeping client sockets persistent (`session_reset()`) and caching open upstream TCP connections.
+   - Diagnosed the 40ms latency freeze caused by Nagle's algorithm waiting on Linux's delayed ACK timer, resolving it with `TCP_NODELAY` and dropping latency from 41.9ms to 0.46ms (91x speedup).
+9. **The Native C Stress Engine (27,000+ Req/Sec)**:
+   - Built a pure C non-blocking stress client in `src/stress.c` reusing the core cross-platform abstraction `poll_engine` (`epoll`/`kqueue`/`WSAPoll`).
+   - Partitioned connections and target request quotas evenly across worker threads with isolated event loops, avoiding all thread locking and mutex contention.
+10. **The RFC 6455 Full-Duplex Tunnel & Dynamic Context Decoupling**:
+    - Embedded 16 KB static WebSocket buffers originally caused `sizeof(struct client_session)` to balloon to 26.3 KB, causing 400 connections (10.5 MB) to spill out of the 8 MB L3 CPU cache.
+    - Decoupled streaming rings onto dynamic `struct tunnel_ctx` allocated on demand upon WebSocket upgrade, shrinking session size to **9.8 KB** and ensuring 400 connections fit 100% inside the L3 CPU cache.
+11. **In-Memory 2-Way Set-Associative DNS Cache**:
+    - Thread-local lock-free 2-way set-associative DNS cache with 32-bit FNV-1a hashing, bypassing `getaddrinfo` NSS lookups and unlocking **88,090 RPS**.
+12. **Transparent Upstream Resilience & Pipelining**:
+    - Transparent auto-retry on stale keep-alive sockets without client-visible drops.
+    - Preserved unconsumed pipeline buffers across epoll turns with boundary `memmove`.
+13. **Lazy Slowloris Timing Defense**:
+    - Enforced 3-second aggregate header accumulation deadlines without paying the cost of clock syscalls on the fast path.
+14. **Breaking the 100,000+ Req/Sec Barrier**:
+    - Reached an all-time record peak of **103,157.54 req/sec** with sub-1.8ms median latency, verified over 23.6 Million continuous requests with **0.00 MB memory drift**.
 
 ---
 

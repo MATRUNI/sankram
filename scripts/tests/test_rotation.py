@@ -136,6 +136,14 @@ def main():
         status_tag = "(ACTIVE)" if f["active"] else ""
         print(f"  - {f['name']:<20} : {f['size'] / 1024.0:.1f} KB {status_tag}")
 
+    orig_config = None
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                orig_config = f.read()
+        except Exception:
+            pass
+
     # 2. Configure 50KB rotation threshold and start Proxy
     with open(CONFIG_PATH, "w") as f:
         f.write("max_log_size = 50KB\n")
@@ -234,7 +242,13 @@ def main():
         return 1
     finally:
         stop_event.set()
-        if os.path.exists(CONFIG_PATH):
+        if orig_config is not None:
+            try:
+                with open(CONFIG_PATH, "w") as f:
+                    f.write(orig_config)
+            except Exception:
+                pass
+        elif os.path.exists(CONFIG_PATH):
             try:
                 os.remove(CONFIG_PATH)
             except Exception:

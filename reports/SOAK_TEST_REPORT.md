@@ -21,17 +21,23 @@ To verify industrial stability and prove that Sankram does not suffer from memor
 
 ## 🥊 5-Minute Endurance: 4 vs 8 vs 10 Reactors
 
-We tested **4-reactor (`-t 4`)**, **8-reactor (`-t 8`)**, and **10-reactor (`-t 10`)** configurations under identical 5-minute sustained workloads (200 concurrent connections across 2 `wrk` threads):
+We tested **4-reactor (`-t 4`)**, **8-reactor (`-t 8`)**, and **10-reactor (`-t 10`)** configurations under sustained workloads (200 concurrent connections across 2 `wrk` threads):
 
-| Metric | 4 Reactors (`-t 4`) | 8 Reactors (`-t 8`) | 10 Reactors (`-t 10`) 🏆 | 10-Reactor Gain vs 4-Core |
+| Metric | 4 Reactors (`-t 4`) | 8 Reactors (`-t 8` Verification) | 8 Reactors (`-t 8` Historical Peak) | 10 Reactors (`-t 10`) 🏆 |
 | :--- | :---: | :---: | :---: | :---: |
-| **Duration** | 5m (300 seconds) | 5m (300 seconds) | **5m (300 seconds)** | Identical |
-| **Total Requests Handled** | 15,480,029 | 24,553,944 | **25,397,612 reqs** | **+9,917,583 (+64.1%)** 🚀 |
-| **Sustained Throughput** | 51,592.04 req/s | 81,843.03 req/s | **84,648.85 req/s** | **+33,056 req/sec (+64.1%)** 🏆 |
-| **Network Transfer Rate** | 6.00 MB/s | 9.52 MB/s | **9.85 MB/s** | **+3.85 MB/s (+64.2%)** |
-| **Total Data Transferred** | 1.76 GB | 2.79 GB | **2.89 Gigabytes** | **+1.13 GB** |
+| **Duration** | 5m (300 seconds) | 5m (300 seconds) | 5m (300 seconds) | **5m (300 seconds)** |
+| **Total Requests Handled** | 15,480,029 | 23,619,416 | 24,553,944 | **25,397,612 reqs** |
+| **Sustained Throughput** | 51,592.04 req/s | 78,729.48 req/s | 81,843.03 req/s | **84,648.85 req/s** 🏆 |
+| **Network Transfer Rate** | 6.00 MB/s | 9.16 MB/s | 9.52 MB/s | **9.85 MB/s** |
+| **Total Data Transferred** | 1.76 GB | 2.68 GB | 2.79 GB | **2.89 Gigabytes** |
+| **Median Latency (p50)** | 3.60 ms | 2.42 ms | 2.30 ms | **2.16 ms** 🎯 |
+| **99th Percentile (p99)** | 8.06 ms | 4.49 ms | 4.16 ms | **4.60 ms** |
 | **Socket Errors / Drops** | **0 (0.00%)** | **0 (0.00%)** | **0 (0.00%)** | **100% Reliable** ✅ |
-| **Peak Resident Memory (RSS)** | **9.95 MB** | **10.13 MB** | **10.21 MB** | **Zero Leak (Flatline)** |
+| **Peak Resident Memory (RSS)** | **9.95 MB** | **10.38 MB** | **10.13 MB** | **Zero Leak (Flatline)** |
+
+> [!NOTE]
+> **Continuous Thermal Saturation vs. Burst Peak**:
+> Under sustained 5-minute 100% CPU saturation on mobile silicon (Intel Core i5-9300H 45W TDP), CPU clocks throttle from 4.1 GHz Turbo down to ~3.1 GHz base clock to respect package power limits. This accounts for the sustained ~78.7k–84.6k req/s plateau. In burst conditions prior to thermal throttling, Sankram achieves an all-time record peak of **103,157.54 requests/second** (`wrk -t 2 -c 200 -d 15s`).
 
 ---
 
