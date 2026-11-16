@@ -54,10 +54,22 @@ int stress_engine_init(struct stress_connection *s)
     s->bytes_sent = 0;
     s->read_bytes = 0;
     int res = connect(s->con.upstream_fd,(struct sockaddr *)&s->worker->target_addr,sizeof(s->worker->target_addr));
-    if(res==0)
+    
+    if(res == 0)
+    {
+        if (strcmp(s->worker->url.schema, "https") == 0)
+            tls_connect(&s->con, s->worker->url.host);
+        else 
+        {
+            s->con.read = plain_read_wrapper;
+            s->con.write = plain_write_wrapper;
+        }
         s->state = CONN_SENDING;
-    if(res == 0 || (res==-1 && socket_errno == EINPROGRESS_COMPAT))
+    } 
+    else if (res == -1 && (socket_errno == EINPROGRESS_COMPAT || socket_errno == EWOULDBLOCK_COMPAT))
+    {
         s->state = CONN_CONNECTING;
+    } 
     else
     {
         close_socket(s->con.upstream_fd);
@@ -100,7 +112,18 @@ int stress_conn_handle(struct stress_connection *s)
     while(s->state == CONN_SENDING && s->bytes_sent < s->worker->request_len)
     {
         int n = s->con.write(&s->con,(char *)s->worker->request_buf+s->bytes_sent,s->worker->request_len-s->bytes_sent);
-        if(n==0) break;
+        if(n==0)
+        {
+            s->worker->reqs_failed++;
+            if (s->con.upstream_fd >= 0)
+                s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
+            conn_close(&s->con);
+            if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
+            {
+                stress_engine_init(s);
+            }
+            return 1;
+        }
         if(n==-1)
         {
             if(socket_errno == EAGAIN_COMPAT || socket_errno == EWOULDBLOCK_COMPAT)
@@ -149,14 +172,14 @@ int stress_conn_handle(struct stress_connection *s)
         }
         if(n==0)
         {
-            if(s->worker->reqs_completed < s->worker->reqs_target)
+            if (s->con.upstream_fd >= 0)
+                s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
+            conn_close(&s->con);
+            if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
             {
-                if (s->con.upstream_fd >= 0)
-                    s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
-                conn_close(&s->con);
                 stress_engine_init(s);
-                return 0;
             }
+            return 0;
         }
         if(n>0)
         {
@@ -165,7 +188,7 @@ int stress_conn_handle(struct stress_connection *s)
             if (strstr(s->read_buf, "\r\n\r\n") != NULL)
             {
                 s->worker->reqs_completed++;
-                if(s->worker->reqs_completed < s->worker->reqs_target)
+                if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
                 {
                     s->bytes_sent = 0;
                     s->read_bytes = 0;
@@ -176,6 +199,18 @@ int stress_conn_handle(struct stress_connection *s)
                 s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
                 conn_close(&s->con);
                 break;
+            }
+            if (s->read_bytes >= sizeof(s->read_buf) - 1)
+            {
+                s->worker->reqs_failed++;
+                if (s->con.upstream_fd >= 0)
+                    s->worker->engine->del(s->worker->engine, s->con.upstream_fd);
+                conn_close(&s->con);
+                if((s->worker->reqs_completed + s->worker->reqs_failed) < s->worker->reqs_target)
+                {
+                    stress_engine_init(s);
+                }
+                return 1;
             }
         }
     }
@@ -193,10 +228,43 @@ static void *stress_worker_thread(void *arg)
         stress_engine_init(&w->conns[i]);
     }
     struct socket_info events[ENGINE_MAX_EVENTS];
+    int consecutive_empty = 0;
     while((w->reqs_completed + w->reqs_failed) < w->reqs_target)
     {
         int n = w->engine->wait(w->engine, events, 500);
         if(n == -1) continue;
+        if(n == 0)
+        {
+            int active = 0;
+            for(int i=0;i<w->conn_count;i++)
+            {
+                if(w->conns[i].con.upstream_fd >= 0)
+                    active++;
+            }
+            if(active == 0)
+            {
+                for(int i=0;i<w->conn_count;i++)
+                {
+                    if(stress_engine_init(&w->conns[i]) == 0)
+                        active++;
+                }
+                if(active == 0)
+                {
+                    consecutive_empty++;
+                    if(consecutive_empty > 5)
+                    {
+                        w->reqs_failed += (w->reqs_target - (w->reqs_completed + w->reqs_failed));
+                        break;
+                    }
+                }
+                else
+                {
+                    consecutive_empty = 0;
+                }
+            }
+            continue;
+        }
+        consecutive_empty = 0;
         for(int i = 0; i < n; i++)
         {
             struct stress_connection *s = events[i].user_data;
@@ -207,7 +275,10 @@ static void *stress_worker_thread(void *arg)
         }
     }
     for (int i = 0; i < w->conn_count; i++) {
-        conn_close(&w->conns[i].con);
+        if (w->conns[i].con.upstream_fd >= 0) {
+            w->engine->del(w->engine, w->conns[i].con.upstream_fd);
+            conn_close(&w->conns[i].con);
+        }
     }
 
     w->engine->destroy(w->engine);

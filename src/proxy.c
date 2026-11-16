@@ -664,6 +664,7 @@ int proxy_handle_client(struct client_session *session)
     
     LEVEL_UPSTREAM_CONNECT:
     headers_end = buffer + session->offset;
+    session->engine->del(session->engine,session->con.upstream_fd);
     
     origin = session->req.headers.fast.origin;
     if(check_socket_connected(session->con.upstream_fd)!=0)
@@ -671,7 +672,6 @@ int proxy_handle_client(struct client_session *session)
         send_client_error(client_fd, 502, "TLS/SSL handshake with target server failed\n");
         goto cleanup_con;
     }
-    session->engine->del(session->engine,session->con.upstream_fd);
     set_socket_blocking(session->con.upstream_fd);
     set_socket_timeout(session->con.upstream_fd);
     if(strcasecmp(session->url.schema,"https")==0)

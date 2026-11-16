@@ -41,7 +41,15 @@ static int wsapoll_engine_wait(struct poll_engine *engine, struct socket_info *e
     int fired = 0;
     for (int i = 0; i < win->count && fired < ENGINE_MAX_EVENTS; i++) {
         if (win->fds[i].revents != 0) {
-            if(win->fds[i].revents & POLLNVAL) continue;
+            if(win->fds[i].revents & POLLNVAL) 
+            {
+                win->fds[i] = win->fds[win->count - 1];
+                win->user_data[i] = win->user_data[win->count - 1];
+                win->oneshot[i] = win->oneshot[win->count - 1];
+                win->count--;
+                i--;
+                continue;
+            }
             events[fired].user_data = win->user_data[i];
             events[fired].events = 0;
             if (win->fds[i].revents & (POLLRDNORM | POLLIN))
