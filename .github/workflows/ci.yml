@@ -56,27 +56,6 @@ jobs:
           echo "| **Standard (-O3)** | \`epoll\` | \`$SIZE_STD\` | **$RPS_STD req/s** | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
           echo "| **Compact (-Os)** | \`epoll\` | \`$SIZE_OPT\` | **$RPS_OPT req/s** | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
 
-      - name: Capture Live Browser Screenshot (Linux Chrome)
-        continue-on-error: true
-        run: |
-          mkdir -p build/screenshots
-          ./build/sankram -b 127.0.0.1 -p 18080 -s scripts/tests/static_fixture --spa -l warn &
-          SERVER_PID=$!
-          sleep 2
-          TARGET_PNG="$PWD/build/screenshots/linux_render.png"
-          google-chrome --headless=new --disable-gpu --no-sandbox "--screenshot=$TARGET_PNG" --window-size=1280,720 http://127.0.0.1:18080/
-          if [ ! -f "$TARGET_PNG" ] && [ -f "screenshot.png" ]; then
-            mv screenshot.png "$TARGET_PNG"
-          fi
-          kill -9 $SERVER_PID 2>/dev/null || true
-
-      - name: Upload Linux Screenshot Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshot-linux
-          path: build/screenshots/linux_render.png
-          if-no-files-found: ignore
-
   macos:
     name: macOS (kqueue & Apple Security)
     runs-on: macos-latest
@@ -108,33 +87,6 @@ jobs:
           echo "| OS Platform | Engine | Binary Size | Throughput (20k reqs) | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|---|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **macOS** | \`kqueue\` | \`$SIZE\` | **$RPS req/s** | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
-
-      - name: Capture Live Browser Screenshot (macOS Chrome)
-        continue-on-error: true
-        run: |
-          mkdir -p build/screenshots
-          ./build/sankram -b 127.0.0.1 -p 18080 -s scripts/tests/static_fixture --spa -l warn &
-          SERVER_PID=$!
-          sleep 2
-
-          CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-          TARGET_PNG="$PWD/build/screenshots/macos_render.png"
-
-          if [ -f "$CHROME_PATH" ]; then
-            "$CHROME_PATH" --headless=new --disable-gpu --no-sandbox "--screenshot=$TARGET_PNG" --window-size=1280,720 http://127.0.0.1:18080/
-          fi
-
-          if [ ! -f "$TARGET_PNG" ] && [ -f "screenshot.png" ]; then
-            mv screenshot.png "$TARGET_PNG"
-          fi
-          kill -9 $SERVER_PID 2>/dev/null || true
-
-      - name: Upload macOS Screenshot Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshot-macos
-          path: build/screenshots/macos_render.png
-          if-no-files-found: ignore
 
   windows:
     name: Windows (WSAPoll & Schannel)
@@ -206,104 +158,3 @@ jobs:
             Stop-Process -Id $proxyProc.Id -Force -ErrorAction SilentlyContinue
             Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
-
-      - name: Capture Live Browser Screenshot (Windows Edge/Chrome)
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path build\screenshots
-          $proxy = Start-Process -FilePath ".\build\sankram.exe" -ArgumentList "-b 127.0.0.1 -p 18080 -s scripts/tests/static_fixture --spa -l warn" -PassThru
-          Start-Sleep -Seconds 3
-
-          try {
-            $browserPath = ""
-            if (Get-Command chrome.exe -ErrorAction SilentlyContinue) {
-              $browserPath = (Get-Command chrome.exe).Source
-            } elseif (Get-Command msedge.exe -ErrorAction SilentlyContinue) {
-              $browserPath = (Get-Command msedge.exe).Source
-            } elseif (Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe") {
-              $browserPath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-            } elseif (Test-Path "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe") {
-              $browserPath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-            } elseif (Test-Path "C:\Program Files\Microsoft\Edge\Application\msedge.exe") {
-              $browserPath = "C:\Program Files\Microsoft\Edge\Application\msedge.exe"
-            }
-            Write-Host "Selected browser on Windows: $browserPath"
-
-            $targetPng = "$PWD\build\screenshots\windows_render.png"
-            $argList = @(
-              "--headless=new",
-              "--disable-gpu",
-              "--no-sandbox",
-              "--window-size=1280,720",
-              "--screenshot=$targetPng",
-              "http://127.0.0.1:18080/"
-            )
-
-            Write-Host "Starting browser with 10s timeout..."
-            $browserProc = Start-Process -FilePath $browserPath -ArgumentList $argList -PassThru -NoNewWindow
-            $browserProc | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
-            if (-not $browserProc.HasExited) {
-              Write-Host "Browser process timed out after 10s, terminating gracefully..."
-              Stop-Process -Id $browserProc.Id -Force -ErrorAction SilentlyContinue
-            }
-
-            if (-not (Test-Path $targetPng) -and (Test-Path "screenshot.png")) {
-              Move-Item "screenshot.png" $targetPng -Force
-            }
-            if (Test-Path $targetPng) {
-              Write-Host "SUCCESS: Screenshot created at $targetPng ($((Get-Item $targetPng).Length) bytes)"
-            } else {
-              Write-Host "WARNING: Screenshot file not found at $targetPng"
-            }
-          } finally {
-            Stop-Process -Id $proxy.Id -Force -ErrorAction SilentlyContinue
-          }
-
-      - name: Upload Windows Screenshot Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: screenshot-windows
-          path: build/screenshots/windows_render.png
-          if-no-files-found: ignore
-
-  visual-showcase:
-    name: Publish Cross-Platform Visual Showcase
-    needs: [linux, macos, windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Download all screenshot artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: downloaded-screenshots
-
-      - name: Commit screenshots to ci-screenshots branch
-        continue-on-error: true
-        run: |
-          mkdir -p final-screenshots
-          find downloaded-screenshots -name "*.png" -exec cp {} final-screenshots/ \;
-          ls -la final-screenshots/
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          git checkout --orphan ci-screenshots || git checkout ci-screenshots
-          git rm -rf . || true
-          cp final-screenshots/*.png . || true
-          git add *.png
-          git commit -m "chore(ci): update cross-platform visual screenshots [skip ci]" || true
-          git push origin ci-screenshots --force || true
-
-      - name: Publish Visual Gallery to Step Summary
-        run: |
-          echo "## 🎨 Cross-Platform Live Browser Visual Showcase" >> $GITHUB_STEP_SUMMARY
-          echo "Live screenshots rendered by real browsers on **Linux (Chrome)**, **macOS (Chrome)**, and **Windows (Edge)** directly served by Sankram:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| 🐧 Linux (Google Chrome) | 🍏 macOS (Google Chrome) | 🪟 Windows (Microsoft Edge) |" >> $GITHUB_STEP_SUMMARY
-          echo "|:---:|:---:|:---:|" >> $GITHUB_STEP_SUMMARY
-          echo "| <img src=\"https://raw.githubusercontent.com/${{ github.repository }}/ci-screenshots/linux_render.png?v=${{ github.sha }}\" width=\"350\"> | <img src=\"https://raw.githubusercontent.com/${{ github.repository }}/ci-screenshots/macos_render.png?v=${{ github.sha }}\" width=\"350\"> | <img src=\"https://raw.githubusercontent.com/${{ github.repository }}/ci-screenshots/windows_render.png?v=${{ github.sha }}\" width=\"350\"> |" >> $GITHUB_STEP_SUMMARY
