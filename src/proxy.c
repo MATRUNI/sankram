@@ -15,6 +15,7 @@
 #include "server.h"
 #include "upstream.h"
 #include "net_compat.h"
+#include "static.h"
 
 #define MAX_HEADER_SIZE (65536)
 
@@ -592,6 +593,19 @@ int proxy_handle_client(struct client_session *session)
 
     if(target==NULL)
     {
+        if (session->static_dir != NULL && session->static_dir[0] != '\0')
+        {
+            int sres = serve_static_file(client_fd, session->static_dir, session->req.path, session->spa_mode);
+            if (sres == 0) {
+                res = PROXY_DONE;
+                goto cleanup_url;
+            }
+            if (sres == 1) {
+                send_client_error(client_fd, 403, "Forbidden\n");
+                res = PROXY_DONE;
+                goto cleanup_url;
+            }
+        }
         strcpy(session->url.host,"127.0.0.1");
         strcpy(session->url.schema,"http");
         strcpy(session->url.port,"3000");
