@@ -35,6 +35,8 @@ struct proxy_config
 
     struct origin_whitelist whitelist;
     struct stress_config stress;
+    char static_dir[256];
+    bool spa_mode;
 };
 
 int parse_config(int argc, char **argv, struct proxy_config *config);

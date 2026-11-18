@@ -52,6 +52,11 @@ SUITES = [
         "name": "Stale Upstream Auto-Retry & HTTP Pipelining",
         "script": "scripts/tests/test_resilience.py",
     },
+    {
+        "id": "static",
+        "name": "Static File Serving & SPA Fallback Engine",
+        "script": "scripts/tests/test_static.py",
+    },
 ]
 
 def main():

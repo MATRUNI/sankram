@@ -83,7 +83,8 @@ struct client_session {
     char initial_buffer[4096];
     struct upstream_pool *pool;
     const struct origin_whitelist *whitelist;
-
+    const char *static_dir;
+    bool spa_mode;
     bool is_websocket;
     struct tunnel_ctx *tunnel;
 

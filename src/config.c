@@ -243,6 +243,16 @@ int parse_config(int argc, char **argv, struct proxy_config *config)
             printf("Successfully spawned default configuration file: proxy.conf\n");
             exit(0);
         }
+        else if (strcasecmp(argv[i], "-s") == 0 || strcasecmp(argv[i], "--static") == 0)
+        {
+            if (i + 1 < argc) {
+                strncpy(config->static_dir, argv[++i], sizeof(config->static_dir) - 1);
+            }
+        }
+        else if (strcasecmp(argv[i], "--spa") == 0)
+        {
+            config->spa_mode = true;
+        }
         else
         {
             write_log(LOG_ERROR, "Invalid arguments.");

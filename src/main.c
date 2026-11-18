@@ -26,6 +26,8 @@ struct worker_context {
     struct upstream_pool pool;
     struct dns_cache dns_cache;
     const struct origin_whitelist *whitelist;
+    const char *static_dir;
+    bool spa_mode;
 };
 
 static void handle_sigint(int sig)
@@ -79,6 +81,8 @@ static void *proxy_thread_worker(void *arg)
                     ses->pool = &self->pool;
                     ses->dns_cache = &self->dns_cache;
                     ses->whitelist = self->whitelist;
+                    ses->static_dir = self->static_dir;
+                    ses->spa_mode = self->spa_mode;
                     self->engine->add(self->engine,client_fd,ENGINE_READ | ENGINE_ONESHOT,ses);
                 }
             }
@@ -116,7 +120,7 @@ static void destroy_worker_thread_attr(void)
     pthread_attr_destroy(&attr);
 }
 
-static int spawn_worker_fleet(struct worker_context *workers, int threads,int port, const char *ip, int timeout,const struct origin_whitelist *whitelist)
+static int spawn_worker_fleet(struct worker_context *workers, const struct proxy_config *config)
 {
     if(workers == NULL)
     {
@@ -125,11 +129,13 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
     }
     
     #if defined(__linux__)
-        for(int i=0;i<threads;i++)
+        for(int i=0;i<config->threads;i++)
         {
             workers[i].id = i;
-            workers[i].whitelist = whitelist;
+            workers[i].whitelist = &config->whitelist;
             workers[i].engine = poll_engine_create();
+            workers[i].static_dir = config->static_dir;
+            workers[i].spa_mode = config->spa_mode;
             if (workers[i].engine == NULL) 
             {
                 write_log(LOG_ERROR, "Failed to create poll engine for worker %d", i);
@@ -137,7 +143,7 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
             }
             dns_cache_init(&workers[i].dns_cache);
             struct proxy_server srv = {0};
-            if(server_init(&srv, port, ip,timeout) != 0)
+            if(server_init(&srv, config->port, config->listen_ip,config->timeout) != 0)
             {
                 write_log(LOG_ERROR, "Failed to init listener socket for worker %d", i);
                 return 1;
@@ -153,17 +159,19 @@ static int spawn_worker_fleet(struct worker_context *workers, int threads,int po
         }
     #else
         struct proxy_server srv = {0};
-        if (server_init(&srv, port, ip, timeout) != 0)
+        if (server_init(&srv, config->port, config->listen_ip, config->timeout) != 0)
         {
             write_log(LOG_ERROR, "Failed to init listener socket");
             return 1;
         }
         set_socket_non_blocking(srv.listen_fd);
-        for (int i = 0; i < threads; i++)
+        for (int i = 0; i < config->threads; i++)
         {
             workers[i].id = i;
-            workers[i].whitelist = whitelist;
+            workers[i].whitelist = &config->whitelist;
             workers[i].engine = poll_engine_create();
+            workers[i].static_dir = config->static_dir;
+            workers[i].spa_mode = config->spa_mode;
             if (workers[i].engine == NULL) return 1;
             
             dns_cache_init(&workers[i].dns_cache);
@@ -197,7 +205,7 @@ static int run_server(const struct proxy_config *config)
     #endif
     get_worker_thread_attr();
     struct worker_context *workers = calloc(config->threads,sizeof(struct worker_context));
-    if(spawn_worker_fleet(workers,(int)config->threads,config->port,config->listen_ip,config->timeout,(const struct origin_whitelist *)&config->whitelist)==1)
+    if(spawn_worker_fleet(workers,config)==1)
     {
         put_to_sleep();
     }
