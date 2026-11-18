@@ -240,9 +240,13 @@ jobs:
               "http://127.0.0.1:18080/"
             )
 
-            Write-Host "Capturing screenshot with -Wait..."
-            $browserProc = Start-Process -FilePath $browserPath -ArgumentList $argList -Wait -PassThru -NoNewWindow
-            Write-Host "Browser exit code: $($browserProc.ExitCode)"
+            Write-Host "Starting browser with 10s timeout..."
+            $browserProc = Start-Process -FilePath $browserPath -ArgumentList $argList -PassThru -NoNewWindow
+            $browserProc | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+            if (-not $browserProc.HasExited) {
+              Write-Host "Browser process timed out after 10s, terminating gracefully..."
+              Stop-Process -Id $browserProc.Id -Force -ErrorAction SilentlyContinue
+            }
 
             if (-not (Test-Path $targetPng) -and (Test-Path "screenshot.png")) {
               Move-Item "screenshot.png" $targetPng -Force
